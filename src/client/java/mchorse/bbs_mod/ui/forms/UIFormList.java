@@ -6,6 +6,7 @@ import mchorse.bbs_mod.forms.FormCategories;
 import mchorse.bbs_mod.forms.FormUtils;
 import mchorse.bbs_mod.forms.FormUtilsClient;
 import mchorse.bbs_mod.forms.categories.FormCategory;
+import mchorse.bbs_mod.l10n.keys.IKey;
 import mchorse.bbs_mod.forms.categories.UserFormCategory;
 import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.forms.sections.UserFormSection;
@@ -93,6 +94,10 @@ public class UIFormList extends UIElement
     private UIFormCategory recent;
     private List<UIFormCategory> categories = new ArrayList<>();
 
+    /** The card-style layout of the categories (BBS CML Edition's look), when it is switched on. */
+    public final UIFormOverview overview = new UIFormOverview(this);
+    public UIIcon overviewToggle;
+
     private long lastUpdate;
     private int lastScroll;
     private boolean pendingScrollToSelected;
@@ -127,7 +132,10 @@ public class UIFormList extends UIElement
         this.expandAll = new UIIcon(Icons.EXPAND_ALL, (b) -> this.setAllExpanded(true));
         this.expandAll.tooltip(UIKeys.FORMS_LIST_EXPAND_ALL, Direction.TOP);
         this.expandAll.w(20);
-        this.bar.add(this.categoryFilter, this.collapseAll, this.expandAll, this.search, this.edit, this.close);
+        this.overviewToggle = new UIIcon(Icons.GALLERY, (b) -> this.overview.toggle());
+        this.overviewToggle.tooltip(IKey.raw("Cards / list layout"), Direction.TOP);
+        this.overviewToggle.w(20);
+        this.bar.add(this.overviewToggle, this.categoryFilter, this.collapseAll, this.expandAll, this.search, this.edit, this.close);
 
         this.add(this.forms, this.bar);
 
@@ -172,6 +180,12 @@ public class UIFormList extends UIElement
         return BBSSettings.formCellSize.get();
     }
 
+    /** The category elements the list built, in their order (some of them may not be on screen). */
+    public List<UIFormCategory> getCategoryUIs()
+    {
+        return this.categories;
+    }
+
     public void setupForms(FormCategories forms)
     {
         this.categories.clear();
@@ -200,6 +214,7 @@ public class UIFormList extends UIElement
             this.categories.get(this.categories.size() - 1).marginBottom(20);
         }
 
+        this.overview.rebuild();
         this.resize();
 
         this.lastUpdate = forms.getLastUpdate();
@@ -737,6 +752,8 @@ public class UIFormList extends UIElement
     public void render(UIContext context)
     {
         FormCategories categories = BBSModClient.getFormCategories();
+
+        this.overview.sync();
 
         if (this.lastScroll >= 0)
         {
