@@ -1,0 +1,15 @@
+{
+	"blend": {
+		"func": "add",
+		"srcrgb": "1-srcalpha",
+		"dstrgb": "srcalpha"
+	},
+	"vertex": "oit_composite",
+	"fragment": "oit_composite",
+	"attributes": ["Position", "UV0"],
+	"samplers": [
+		{ "name": "Sampler0" },
+		{ "name": "Sampler1" }
+	],
+	"uniforms": []
+}
