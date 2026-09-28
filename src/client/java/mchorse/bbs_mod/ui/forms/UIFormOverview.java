@@ -1,65 +1,76 @@
 package mchorse.bbs_mod.ui.forms;
 
 import mchorse.bbs_mod.BBSSettings;
-import mchorse.bbs_mod.forms.FormUtilsClient;
 import mchorse.bbs_mod.forms.categories.FormCategory;
 import mchorse.bbs_mod.forms.categories.RecentFormCategory;
 import mchorse.bbs_mod.forms.categories.UserFormCategory;
-import mchorse.bbs_mod.forms.forms.Form;
 import mchorse.bbs_mod.ui.forms.categories.UIFormCategory;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
+import mchorse.bbs_mod.ui.framework.elements.input.list.UIStringList;
 import mchorse.bbs_mod.ui.framework.elements.utils.Batcher2D;
 import mchorse.bbs_mod.ui.framework.elements.utils.FontRenderer;
-import mchorse.bbs_mod.ui.utils.Area;
 import mchorse.bbs_mod.ui.utils.icons.Icons;
 import mchorse.bbs_mod.utils.colors.Colors;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
- * "Overview" layout of the form list, modelled on BBS CML Edition's category cards.
+ * "Sidebar" layout of the form list.
  *
- * <p>Instead of one full-width strip per category, categories are shown as small cards
- * (a 2x2 preview of the first forms and a "+N" count) that wrap in a grid under a heading
- * per group (Recent forms, Categories, Models, Particles...). Clicking a card opens that
- * category as a full-width panel right under the row of cards it sits in - the panel is
- * the ordinary {@link UIFormCategory}, so selecting, dragging and the context menus work
- * exactly as they always did.</p>
+ * <p>A column on the left lists every category by name (Home, Recent forms, Models (car)...),
+ * and the space beside it shows either:</p>
+ * <ul>
+ *   <li><b>Home</b>: one small tile per category - folder icon, name and how many forms it
+ *   holds - grouped under headings (Recent forms, Categories, Models, Particles...). Nothing
+ *   is rendered inside the tiles, so opening the list is cheap even with thousands of models.</li>
+ *   <li><b>A category</b>: the ordinary {@link UIFormCategory} with all its forms. Only now are
+ *   the form previews drawn, and only for the category you opened.</li>
+ * </ul>
  *
- * <p>Only one category is open at a time (opening a card closes the others). While a
- * search is typed the list falls back to its normal layout, so results are not hidden
- * inside closed cards.</p>
+ * <p>Click a tile or a name in the sidebar to open a category, Home to come back. Selecting,
+ * dragging and the context menus inside a category work exactly as they always did. While a
+ * search is typed the list falls back to its normal layout, so results are not hidden.</p>
  */
 public class UIFormOverview
 {
-    /** Whether new lists start in overview mode. Shared by every list, reset with the game. */
+    /** Whether new lists start in sidebar mode. Shared by every list, reset with the game. */
     private static boolean enabled = true;
 
-    public static final int CARD_W = 170;
-    public static final int CARD_H = 148;
+    public static final int SIDEBAR_W = 150;
+    public static final int TILE_W = 170;
+    public static final int TILE_H = 44;
     public static final int GAP = 8;
     public static final int PAD = 10;
-    public static final int CARD_HEADER = 20;
     public static final int HEADING_H = 28;
 
     private final UIFormList list;
+    private final UIStringList sidebar;
 
-    /* Categories whose thumbnails were switched off with the card's eye (by category id) */
-    private final Set<String> hiddenPreviews = new HashSet<>();
+    /** The categories the sidebar rows stand for, in row order (row 0 is Home). */
+    private List<UIFormCategory> sidebarCategories = new ArrayList<>();
 
-    private boolean built;
-    private boolean collapsedOnce;
+    private boolean attached;
+
+    /** Id of the category the list is showing right now, or null on Home. */
+    private String enteredId;
+
+    /** Scroll position of Home, to come back to after visiting a category. */
+    private double savedScroll;
+
+    /** A scroll position to apply once the next rebuild has laid everything out. */
+    private Double pendingScroll;
+
     private String signature = "";
 
     public UIFormOverview(UIFormList list)
     {
         this.list = list;
+        this.sidebar = new UIStringList(this::onSidebarPick);
+        this.sidebar.background();
     }
 
     public boolean isEnabled()
@@ -77,15 +88,99 @@ public class UIFormOverview
     {
         enabled = !enabled;
 
+        this.enteredId = null;
         this.signature = "";
-        this.collapsedOnce = false;
+    }
+
+    /* Navigation. These only note the wish: the layout changes on the next frame, in
+     * sync(), so the element tree is never rebuilt in the middle of a click. */
+
+    private void enter(UIFormCategory card)
+    {
+        if (this.enteredId == null)
+        {
+            this.savedScroll = this.list.forms.scroll.getScroll();
+        }
+
+        this.enteredId = card.category.visible.getId();
+        this.pendingScroll = 0D;
+        this.signature = "";
+    }
+
+    public void leave()
+    {
+        if (this.enteredId == null)
+        {
+            return;
+        }
+
+        this.enteredId = null;
+        this.pendingScroll = this.savedScroll;
+        this.signature = "";
+    }
+
+    private void onSidebarPick(List<String> picked)
+    {
+        int index = this.sidebar.getIndex();
+
+        if (index <= 0 || index > this.sidebarCategories.size())
+        {
+            this.leave();
+        }
+        else
+        {
+            this.enter(this.sidebarCategories.get(index - 1));
+        }
+    }
+
+    private UIFormCategory findEntered(List<UIFormCategory> categories)
+    {
+        if (this.enteredId == null)
+        {
+            return null;
+        }
+
+        for (UIFormCategory category : categories)
+        {
+            if (this.enteredId.equals(category.category.visible.getId()))
+            {
+                return category;
+            }
+        }
+
+        return null;
     }
 
     /* Layout */
 
+    private void attach()
+    {
+        if (this.attached)
+        {
+            return;
+        }
+
+        int top = UIFormList.BAR_HEIGHT + UIFormList.STATUS_HEIGHT;
+
+        this.attached = true;
+        this.sidebar.relative(this.list).xy(0, top).w(SIDEBAR_W).h(1F, -top);
+        this.list.add(this.sidebar);
+    }
+
     /** Called every frame: rebuilds the layout only when something that shapes it changed. */
     public void sync()
     {
+        if (this.isActive() && this.signature.startsWith("o") && this.enteredId != null)
+        {
+            /* The open category was folded with its own header (or "collapse all"): back to Home */
+            UIFormCategory current = this.findEntered(this.list.getCategoryUIs());
+
+            if (current != null && !current.category.visible.get())
+            {
+                this.leave();
+            }
+        }
+
         String current = this.computeSignature();
 
         if (!current.equals(this.signature))
@@ -97,34 +192,47 @@ public class UIFormOverview
     private String computeSignature()
     {
         StringBuilder builder = new StringBuilder();
-
-        builder.append(this.isActive() ? 'o' : 'n').append(this.list.forms.area.w / 8).append(':');
+        int titles = 0;
 
         for (UIFormCategory category : this.list.getCategoryUIs())
         {
             builder.append(category.category.visible.get() ? '1' : '0');
+            titles = titles * 31 + category.category.getProcessedTitle().hashCode() + category.category.getForms().size();
         }
 
-        builder.append(':').append(this.list.getCategoryUIs().size());
-
-        return builder.toString();
+        return (this.isActive() ? "o" : "n") + this.list.forms.area.w / 8 + ":" + builder + ":" + this.list.getCategoryUIs().size() + ":" + titles + ":" + this.enteredId;
     }
 
     /** Lay the categories out again, in the mode the list is in right now. */
     public void rebuild()
     {
+        this.attach();
+
         List<UIFormCategory> categories = this.list.getCategoryUIs();
         boolean active = this.isActive();
+        UIFormCategory inside = null;
+        int top = UIFormList.BAR_HEIGHT + UIFormList.STATUS_HEIGHT;
 
-        if (active && !this.collapsedOnce)
+        this.sidebar.setVisible(active);
+        this.list.forms.xy(active ? SIDEBAR_W : 0, top).w(1F, active ? -SIDEBAR_W : 0);
+
+        if (active)
         {
-            /* Every panel open at once would bury the cards, so start with all of them closed */
-            this.collapsedOnce = true;
+            inside = this.findEntered(categories);
 
+            if (inside == null)
+            {
+                /* On Home, or the category is gone (its last model was deleted) */
+                this.enteredId = null;
+            }
+
+            /* Home shows no panels; a category page has only that one open */
             for (UIFormCategory category : categories)
             {
-                category.category.visible.set(false);
+                category.category.visible.set(category == inside);
             }
+
+            this.fillSidebar(categories, inside);
         }
 
         this.signature = this.computeSignature();
@@ -143,20 +251,28 @@ public class UIFormOverview
                 categories.get(categories.size() - 1).marginBottom(20);
             }
 
-            this.built = true;
-            this.list.resize();
+            this.finishLayout();
+
+            return;
+        }
+
+        if (inside != null)
+        {
+            inside.marginBottom(20);
+            this.list.forms.add(inside);
+
+            this.finishLayout();
 
             return;
         }
 
         int width = this.list.forms.area.w;
-        int perRow = Math.max(1, (width - PAD * 2 + GAP) / (CARD_W + GAP));
+        int perRow = Math.max(1, (width - PAD * 2 + GAP) / (TILE_W + GAP));
 
         Map<String, List<UIFormCategory>> groups = new LinkedHashMap<>();
 
         for (UIFormCategory category : categories)
         {
-            category.marginBottom(GAP);
             groups.computeIfAbsent(groupOf(category.category), (k) -> new ArrayList<>()).add(category);
         }
 
@@ -167,23 +283,15 @@ public class UIFormOverview
             heading.w(1F).h(HEADING_H);
             this.list.forms.add(heading);
 
-            List<UIFormCategory> cards = group.getValue();
+            List<UIFormCategory> tiles = group.getValue();
 
-            for (int i = 0; i < cards.size(); i += perRow)
+            for (int i = 0; i < tiles.size(); i += perRow)
             {
-                List<UIFormCategory> row = cards.subList(i, Math.min(cards.size(), i + perRow));
-                UIElement rowElement = new CardRow(this, new ArrayList<>(row));
+                List<UIFormCategory> row = tiles.subList(i, Math.min(tiles.size(), i + perRow));
+                UIElement rowElement = new TileRow(this, new ArrayList<>(row));
 
-                rowElement.w(1F).h(CARD_H).marginBottom(GAP);
+                rowElement.w(1F).h(TILE_H).marginBottom(GAP);
                 this.list.forms.add(rowElement);
-
-                for (UIFormCategory card : row)
-                {
-                    if (card.category.visible.get())
-                    {
-                        this.list.forms.add(card);
-                    }
-                }
             }
         }
 
@@ -192,39 +300,37 @@ public class UIFormOverview
         bottom.w(1F).h(20);
         this.list.forms.add(bottom);
 
-        this.built = true;
+        this.finishLayout();
+    }
+
+    private void fillSidebar(List<UIFormCategory> categories, UIFormCategory inside)
+    {
+        List<String> titles = new ArrayList<>();
+        double scroll = this.sidebar.scroll.getScroll();
+
+        titles.add("Home");
+
+        for (UIFormCategory category : categories)
+        {
+            titles.add(category.category.getProcessedTitle());
+        }
+
+        this.sidebarCategories = new ArrayList<>(categories);
+        this.sidebar.clear();
+        this.sidebar.add(titles);
+        this.sidebar.setIndex(inside == null ? 0 : categories.indexOf(inside) + 1);
+        this.sidebar.scroll.setScroll(scroll);
+    }
+
+    private void finishLayout()
+    {
         this.list.resize();
-    }
 
-    /** Open the card's category, closing the others; closes it if it already was the open one. */
-    private void toggleOpen(UIFormCategory card)
-    {
-        boolean open = card.category.visible.get();
-
-        for (UIFormCategory category : this.list.getCategoryUIs())
+        if (this.pendingScroll != null)
         {
-            category.category.visible.set(false);
+            this.list.forms.scroll.setScroll(this.pendingScroll);
+            this.pendingScroll = null;
         }
-
-        if (!open)
-        {
-            card.category.visible.set(true);
-        }
-    }
-
-    private void togglePreview(UIFormCategory card)
-    {
-        String id = card.category.visible.getId();
-
-        if (!this.hiddenPreviews.remove(id))
-        {
-            this.hiddenPreviews.add(id);
-        }
-    }
-
-    private boolean isPreviewHidden(UIFormCategory card)
-    {
-        return this.hiddenPreviews.contains(card.category.visible.getId());
     }
 
     /** The heading a category sits under: user categories together, the rest by their title. */
@@ -270,21 +376,26 @@ public class UIFormOverview
         }
     }
 
-    /** One row of cards. */
-    public static class CardRow extends UIElement
+    /** One row of folder tiles. Nothing inside a tile is rendered from the forms themselves. */
+    public static class TileRow extends UIElement
     {
         private final UIFormOverview overview;
-        private final List<UIFormCategory> cards;
+        private final List<UIFormCategory> tiles;
 
-        public CardRow(UIFormOverview overview, List<UIFormCategory> cards)
+        public TileRow(UIFormOverview overview, List<UIFormCategory> tiles)
         {
             this.overview = overview;
-            this.cards = cards;
+            this.tiles = tiles;
         }
 
-        private int cardX(int index)
+        private int tileX(int index)
         {
-            return this.area.x + PAD + index * (CARD_W + GAP);
+            return this.area.x + PAD + index * (TILE_W + GAP);
+        }
+
+        private boolean isOver(UIContext context, int x)
+        {
+            return context.mouseX >= x && context.mouseX < x + TILE_W && context.mouseY >= this.area.y && context.mouseY < this.area.y + TILE_H;
         }
 
         @Override
@@ -295,27 +406,14 @@ public class UIFormOverview
                 return false;
             }
 
-            for (int i = 0; i < this.cards.size(); i++)
+            for (int i = 0; i < this.tiles.size(); i++)
             {
-                int x = this.cardX(i);
-
-                if (context.mouseX < x || context.mouseX >= x + CARD_W || context.mouseY < this.area.y || context.mouseY >= this.area.y + CARD_H)
+                if (this.isOver(context, this.tileX(i)))
                 {
-                    continue;
-                }
+                    this.overview.enter(this.tiles.get(i));
 
-                UIFormCategory card = this.cards.get(i);
-
-                if (context.mouseX >= x + CARD_W - 22 && context.mouseY < this.area.y + CARD_HEADER)
-                {
-                    this.overview.togglePreview(card);
+                    return true;
                 }
-                else
-                {
-                    this.overview.toggleOpen(card);
-                }
-
-                return true;
             }
 
             return false;
@@ -324,67 +422,29 @@ public class UIFormOverview
         @Override
         public void render(UIContext context)
         {
-            UIFormList list = this.overview.list;
-            Area window = new Area();
-
-            /* Areas are in the scroll view's content space: keep to what the view shows */
-            window.set(list.forms.area.x, list.forms.area.y + (int) list.forms.scroll.getScroll(), list.forms.area.w, list.forms.area.h);
-
-            if (this.area.y + CARD_H >= window.y && this.area.y <= window.ey())
-            {
-                for (int i = 0; i < this.cards.size(); i++)
-                {
-                    this.renderCard(context, this.cards.get(i), this.cardX(i), this.area.y);
-                }
-            }
-
-            super.render(context);
-        }
-
-        private void renderCard(UIContext context, UIFormCategory card, int x, int y)
-        {
             Batcher2D batcher = context.batcher;
             FontRenderer font = batcher.getFont();
             int primary = BBSSettings.primaryColor.get();
-            boolean opened = card.category.visible.get();
-            boolean hover = context.mouseX >= x && context.mouseX < x + CARD_W && context.mouseY >= y && context.mouseY < y + CARD_H && this.area.isInside(context);
-            boolean previews = !this.overview.isPreviewHidden(card);
 
-            batcher.box(x, y, x + CARD_W, y + CARD_H, opened ? (Colors.A50 | primary) : BBSSettings.color(BBSSettings.chromeSurface(), Colors.A50));
-            batcher.outline(x, y, x + CARD_W, y + CARD_H, opened || hover ? (Colors.A100 | primary) : Colors.A50, 1);
-
-            String title = font.limitToWidth(card.category.getProcessedTitle(), CARD_W - 34);
-
-            batcher.textShadow(title, x + 6, y + 6, Colors.WHITE);
-            batcher.icon(previews ? Icons.VISIBLE : Icons.INVISIBLE, Colors.WHITE, x + CARD_W - 12, y + CARD_HEADER / 2F, 0.5F, 0.5F);
-
-            if (!previews)
+            for (int i = 0; i < this.tiles.size(); i++)
             {
-                return;
+                UIFormCategory tile = this.tiles.get(i);
+                int x = this.tileX(i);
+                int y = this.area.y;
+                boolean hover = this.area.isInside(context) && this.isOver(context, x);
+
+                batcher.box(x, y, x + TILE_W, y + TILE_H, BBSSettings.color(BBSSettings.chromeSurface(), Colors.A50));
+                batcher.outline(x, y, x + TILE_W, y + TILE_H, hover ? (Colors.A100 | primary) : Colors.A50, 1);
+                batcher.icon(Icons.FOLDER, Colors.WHITE, x + 22, y + TILE_H / 2F, 0.5F, 0.5F);
+
+                String title = font.limitToWidth(tile.category.getProcessedTitle(), TILE_W - 50);
+                int count = tile.category.getForms().size();
+
+                batcher.textShadow(title, x + 42, y + 9, Colors.WHITE);
+                batcher.text(count + (count == 1 ? " form" : " forms"), x + 42, y + 9 + font.getHeight() + 4, Colors.GRAY);
             }
 
-            List<Form> forms = card.category.getForms();
-            int pad = 4;
-            int cw = (CARD_W - pad * 2 - pad) / 2;
-            int ch = (CARD_H - CARD_HEADER - pad * 3) / 2;
-
-            for (int i = 0; i < Math.min(4, forms.size()); i++)
-            {
-                int cx = x + pad + (i % 2) * (cw + pad);
-                int cy = y + CARD_HEADER + pad + (i / 2) * (ch + pad);
-
-                batcher.box(cx, cy, cx + cw, cy + ch, Colors.A50);
-                batcher.clip(cx, cy, cw, ch, context);
-                FormUtilsClient.renderPreview(forms.get(i), context, cx, cy, cx + cw, cy + ch);
-                batcher.unclip(context);
-            }
-
-            if (forms.size() > 4)
-            {
-                String more = "+" + (forms.size() - 4);
-
-                batcher.textCard(more, x + CARD_W - pad - font.getWidth(more) - 6, y + CARD_H - pad - font.getHeight() - 6, Colors.WHITE, Colors.A75, 2);
-            }
+            super.render(context);
         }
     }
 }
