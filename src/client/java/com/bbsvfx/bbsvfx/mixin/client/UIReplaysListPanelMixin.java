@@ -47,7 +47,7 @@ public abstract class UIReplaysListPanelMixin
     @Shadow @Final public UITextbox search;
 
     @Inject(method = "<init>", at = @At("TAIL"))
-    private void bbsvfx$addCaptureButtons(UIFilmPanel panel, Consumer<List<Replay>> callback, Consumer<Form> formConsumer, CallbackInfo ci)
+    private void bbsvfx$addCaptureButtons(UIFilmPanel panel, Consumer<List<Replay>> callback, Consumer<Form> formConsumer, Consumer<String> partConsumer, CallbackInfo ci)
     {
         UIIcon capture = new UIIcon(BbsVfxIcons.DESTRUCTION, (b) ->
             b.getContext().replaceContextMenu((menu) ->
