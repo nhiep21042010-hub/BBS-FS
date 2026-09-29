@@ -79,6 +79,14 @@ dependencies {
 
 	modImplementation "org.anarres:jcpp:1.4.14"
 	modImplementation "io.github.douira:glsl-transformer:2.0.0-pre13"
+
+	// BBS VFX (merged in): NVIDIA PhysX bindings for the destruction box, bundled into the mod jar.
+	// The PhysX code lives in the client source set, so it needs "clientImplementation", not
+	// plain "implementation" (which only reaches the main source set in a split-sourceset project).
+	clientImplementation "de.fabmax:physx-jni:2.7.1"
+	clientRuntimeOnly "de.fabmax:physx-jni:2.7.1:natives-windows"
+	include "de.fabmax:physx-jni:2.7.1"
+	include "de.fabmax:physx-jni:2.7.1:natives-windows"
 }
 
 processResources {

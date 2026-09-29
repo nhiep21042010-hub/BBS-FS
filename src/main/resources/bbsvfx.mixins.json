@@ -1,0 +1,27 @@
+{
+    "required": true,
+    "minVersion": "0.8",
+    "package": "com.bbsvfx.bbsvfx.mixin",
+    "compatibilityLevel": "JAVA_17",
+    "mixins": [
+        "ActionManagerAccessor",
+        "AnchorFormMixin",
+        "BBSModFormsMixin",
+        "BBSSettingsMixin",
+        "BlendFormMixin",
+        "FollowCurveFormMixin",
+        "FormUtilsPoseMixin",
+        "KeyframeChannelLegacyMixin",
+        "LabelFormMixin",
+        "LegacyNamespaceMixin",
+        "ModelFormSmearChannelsMixin",
+        "PoseTransformBlendMixin",
+        "PoseTransformSmearMixin",
+        "ReplayFollowMixin",
+        "SmearFormMixin",
+        "WholeFormSmearMixin"
+    ],
+    "injectors": {
+        "defaultRequire": 1
+    }
+}
