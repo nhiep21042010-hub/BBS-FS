@@ -1,5 +1,8 @@
 package com.bbsvfx.bbsvfx.mixin.client;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.systems.RenderSystem;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.forms.FormUtilsClient;
@@ -12,7 +15,6 @@ import mchorse.bbs_mod.utils.pose.PoseTransform;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import com.bbsvfx.bbsvfx.client.IArcTrailDrawer;
 import com.bbsvfx.bbsvfx.client.SmearRenderState;
 import com.bbsvfx.bbsvfx.client.SmearReplayState;
@@ -24,7 +26,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Per-bone smear render hook. Wraps the single {@code renderer.render(context)} call inside
+ * Per-bone smear render hook (WrapOperation, so it coexists with other mods hooking the same call,
+ * e.g. IRLights). Wraps the single {@code renderer.render(context)} call inside
  * {@link FormUtilsClient#render}: when a model form has bones carrying a smear vector (set per bone in
  * the pose editor, animated with the pose), the model is drawn several times — each copy displacing
  * only the smeared bones along their vector (via {@code ModelFormRendererPoseMixin}) with fading
@@ -34,12 +37,12 @@ import java.util.Set;
 public abstract class SmearRenderMixin
 {
 
-    @Redirect(
+    @WrapOperation(
         method = "render(Lmchorse/bbs_mod/forms/forms/Form;Lmchorse/bbs_mod/forms/renderers/FormRenderingContext;)V",
         at = @At(
             value = "INVOKE",
             target = "Lmchorse/bbs_mod/forms/renderers/FormRenderer;render(Lmchorse/bbs_mod/forms/renderers/FormRenderingContext;)V"))
-    private static void bbsvfx$smear(FormRenderer renderer, FormRenderingContext context, Form form)
+    private static void bbsvfx$smear(FormRenderer renderer, FormRenderingContext context, Operation<Void> wrapped, @Local(argsOnly = true) Form form)
     {
         /* Impact-silhouette replay gets the CRISP model only: the coverage buffer fills every pass
          * it receives with one flat colour, so running the smear redirect there (intended as "trail
@@ -50,7 +53,7 @@ public abstract class SmearRenderMixin
         if (context.stencilMap != null || SmearRenderState.active
             || com.bbsvfx.bbsvfx.client.BbsVfxImpactSilhouette.replaying)
         {
-            renderer.render(context);
+            wrapped.call(renderer, context);
             return;
         }
 
@@ -74,20 +77,20 @@ public abstract class SmearRenderMixin
                     /* Arc (auto) needs the replay bridge to re-pose at past times. */
                     if (smear.bbsvfx$smearArc() > 0F && SmearReplayState.has(context.entity))
                     {
-                        bbsvfx$renderFormArc(renderer, context, form, smear);
+                        bbsvfx$renderFormArc(wrapped, renderer, context, form, smear);
                         return;
                     }
 
                     /* Manual vector smear (no bridge needed) — offset the whole form's transform. */
                     if (smear.bbsvfx$smearArc() <= 0F && smear.bbsvfx$smearManual() > 0F)
                     {
-                        bbsvfx$renderFormVector(renderer, context, form, smear);
+                        bbsvfx$renderFormVector(wrapped, renderer, context, form, smear);
                         return;
                     }
                 }
             }
 
-            renderer.render(context);
+            wrapped.call(renderer, context);
             return;
         }
 
@@ -117,7 +120,7 @@ public abstract class SmearRenderMixin
 
         if (!doArc && !doVector)
         {
-            renderer.render(context);
+            wrapped.call(renderer, context);
             return;
         }
 
@@ -134,20 +137,20 @@ public abstract class SmearRenderMixin
              * defer (linesPending) so they draw AFTER all copies — on top, binding the arc. */
             SmearRenderState.linesPending = true;
             context.color = original;
-            renderer.render(context);
+            wrapped.call(renderer, context);
 
             if (doArc)
             {
                 Set<String> hide = new HashSet<>(allBones);
                 hide.removeAll(bbsvfx$withDescendants(model, arcBones));
-                bbsvfx$arcCopies(renderer, model, context, form, pose, arcBones, hide, original);
+                bbsvfx$arcCopies(wrapped, renderer, model, context, form, pose, arcBones, hide, original);
             }
 
             if (doVector)
             {
                 Set<String> hide = new HashSet<>(allBones);
                 hide.removeAll(bbsvfx$withDescendants(model, vectorBones));
-                bbsvfx$vectorCopies(renderer, model, context, pose, vectorBones, hide, original);
+                bbsvfx$vectorCopies(wrapped, renderer, model, context, pose, vectorBones, hide, original);
             }
         }
         finally
@@ -163,7 +166,7 @@ public abstract class SmearRenderMixin
 
     /** Manual vector smear copies for the given bones (isolated): each copy offsets only these bones along
      *  their smear vector, fading. Drawn on top of the crisp model; copies write depth (occlude entities). */
-    private static void bbsvfx$vectorCopies(FormRenderer renderer, ModelFormRenderer model, FormRenderingContext context, Pose pose, Set<String> vectorBones, Set<String> hide, int original)
+    private static void bbsvfx$vectorCopies(Operation<Void> wrapped, FormRenderer renderer, ModelFormRenderer model, FormRenderingContext context, Pose pose, Set<String> vectorBones, Set<String> hide, int original)
     {
         ISmearBone lead = (ISmearBone) pose.transforms.get(vectorBones.iterator().next());
         int count = Math.max(1, Math.round(lead.bbsvfx$smearCount() > 0F ? lead.bbsvfx$smearCount() : 4F));
@@ -178,7 +181,7 @@ public abstract class SmearRenderMixin
             SmearRenderState.begin(model, -fraction, 1.5F, fraction * dissolveAmount);
             SmearRenderState.hide = hide;
             context.color = bbsvfx$withAlpha(original, alpha);
-            renderer.render(context);
+            wrapped.call(renderer, context);
             SmearRenderState.end();
         }
     }
@@ -190,7 +193,7 @@ public abstract class SmearRenderMixin
      * Only the arc-smeared bone(s) stay visible per copy (the rest are alpha-hidden), so just that limb
      * trails. After the copies, the present pose is re-applied and the crisp model drawn on top.
      */
-    private static void bbsvfx$arcCopies(FormRenderer renderer, ModelFormRenderer model, FormRenderingContext context, Form form, Pose pose, Set<String> arcBones, Set<String> hide, int original)
+    private static void bbsvfx$arcCopies(Operation<Void> wrapped, FormRenderer renderer, ModelFormRenderer model, FormRenderingContext context, Form form, Pose pose, Set<String> arcBones, Set<String> hide, int original)
     {
         ISmearBone lead = (ISmearBone) pose.transforms.get(arcBones.iterator().next());
         int count = Math.max(1, Math.round(lead.bbsvfx$smearCount() > 0F ? lead.bbsvfx$smearCount() : 4F));
@@ -240,7 +243,7 @@ public abstract class SmearRenderMixin
             Matrix4f root = bbsvfx$rootBegin(context, replay, tk, now);
             SmearRenderState.beginArc(model, f * dissolveAmount, hide, copyStretch, f, pose);
             context.color = bbsvfx$withAlpha(bbsvfx$desaturate(original, 0.6F * f), bandOpacity);
-            renderer.render(context);
+            wrapped.call(renderer, context);
             SmearRenderState.end();
             bbsvfx$rootEnd(context, root);
         }
@@ -265,7 +268,7 @@ public abstract class SmearRenderMixin
             Matrix4f root = bbsvfx$rootBegin(context, replay, tk, now);
             SmearRenderState.beginArc(model, f * dissolveAmount, hide, copyStretch, f, pose);
             context.color = bbsvfx$withAlpha(bbsvfx$desaturate(original, 0.6F * f), alpha);
-            renderer.render(context);
+            wrapped.call(renderer, context);
             SmearRenderState.end();
             bbsvfx$rootEnd(context, root);
         }
@@ -314,7 +317,7 @@ public abstract class SmearRenderMixin
      * A dense faint overlap band fills the gaps, the crisp multiples sit on top. No bone isolation and no
      * geometric deformation (the whole form is one piece) — connection comes from the overlap.
      */
-    private static void bbsvfx$renderFormArc(FormRenderer renderer, FormRenderingContext context, Form form, ISmearBone smear)
+    private static void bbsvfx$renderFormArc(Operation<Void> wrapped, FormRenderer renderer, FormRenderingContext context, Form form, ISmearBone smear)
     {
         int count = Math.max(1, Math.round(smear.bbsvfx$smearCount() > 0F ? smear.bbsvfx$smearCount() : 4F));
         float fade = Math.max(0F, Math.min(1F, smear.bbsvfx$smearFalloff()));
@@ -329,7 +332,7 @@ public abstract class SmearRenderMixin
 
         /* Crisp current form first (writes depth), then copies on top with depth-write off. */
         context.color = original;
-        renderer.render(context);
+        wrapped.call(renderer, context);
 
         RenderSystem.depthMask(false);
 
@@ -343,7 +346,7 @@ public abstract class SmearRenderMixin
             Matrix4f root = bbsvfx$rootBegin(context, replay, tk, now);
             SmearRenderState.beginArc(renderer, f * dissolveAmount, null, 0F, f, null);
             context.color = bbsvfx$withAlpha(bbsvfx$desaturate(original, 0.6F * f), bandOpacity);
-            renderer.render(context);
+            wrapped.call(renderer, context);
             SmearRenderState.end();
             bbsvfx$rootEnd(context, root);
         }
@@ -362,7 +365,7 @@ public abstract class SmearRenderMixin
             Matrix4f root = bbsvfx$rootBegin(context, replay, tk, now);
             SmearRenderState.beginArc(renderer, f * dissolveAmount, null, 0F, f, null);
             context.color = bbsvfx$withAlpha(bbsvfx$desaturate(original, 0.6F * f), alpha);
-            renderer.render(context);
+            wrapped.call(renderer, context);
             SmearRenderState.end();
             bbsvfx$rootEnd(context, root);
         }
@@ -376,7 +379,7 @@ public abstract class SmearRenderMixin
      * offsetting the form's whole transform along the smear vector — a fading trail, the first-impl look
      * but for the whole form. No time-rewind / bridge needed.
      */
-    private static void bbsvfx$renderFormVector(FormRenderer renderer, FormRenderingContext context, Form form, ISmearBone smear)
+    private static void bbsvfx$renderFormVector(Operation<Void> wrapped, FormRenderer renderer, FormRenderingContext context, Form form, ISmearBone smear)
     {
         int count = Math.max(1, Math.round(smear.bbsvfx$smearCount() > 0F ? smear.bbsvfx$smearCount() : 4F));
         float falloff = Math.max(smear.bbsvfx$smearFalloff() > 0F ? smear.bbsvfx$smearFalloff() : 0.6F, 0.001F);
@@ -401,13 +404,13 @@ public abstract class SmearRenderMixin
             translate.set(ox - sx * fraction, oy - sy * fraction, oz - sz * fraction);
             SmearRenderState.beginArc(renderer, fraction * dissolveAmount, null, 0F, fraction, null);
             context.color = bbsvfx$withAlpha(original, alpha);
-            renderer.render(context);
+            wrapped.call(renderer, context);
             SmearRenderState.end();
         }
 
         translate.set(ox, oy, oz);
         context.color = original;
-        renderer.render(context);
+        wrapped.call(renderer, context);
     }
 
     /**
