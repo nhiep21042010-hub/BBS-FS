@@ -1,0 +1,232 @@
+# VFX LIGHTS patch for IterationRP (hybrid deferred + path-traced). Anchors are lines from
+# IterationRP 0.7.7's clean sources; if one is reported missing, the pack moved it.
+# Version coverage: 0.7.7 and v0.8.9 share the colorimg4 anchor; v0.8.23 (and the wemppy edit
+# derived from it) renamed the buffer to FBIMG_SST_TEMPORAL — the second @after carries the same
+# light block for them. Exactly one of the two imageStore anchors exists in any version, so the
+# block lands once and the other anchor just reports itself moved (case-insensitive pack match
+# also catches the lowercase "iterationrp wemppy edit").
+# The Entities_FS section carries the BBS-actor translucency fix: stock 0.8.x renders BBS model
+# forms (translucent vertex colour) through the SOLID entities program where blending cannot
+# work — the wemppy edit's own remedy, ported. On the wemppy edit itself both inserts degrade
+# to no-ops (its alpha multiply already happened, and its stochastic block never discards after
+# ours forced albedo.a = 1.0).
+#
+# Injects into the OPAQUE deferred pass Soild_FS.glsl, PRE-albedo into diffuse — the same hook the
+# IRLite light mod uses on this pack, and the correct one: the pack multiplies our diffuse by the
+# surface albedo (so white walls don't blow out) and it rides the pack's exposure, reflections and GI.
+# (An earlier attempt to add the light in a late composite AFTER tonemap over-brightened the whole
+# scene, because it skipped both the albedo multiply and auto-exposure — reverted.)
+#
+# Normals are WORLD space (gbuffer.worldNormal / .vertexNormal) — passed straight to the shared code.
+# ★POSITION must be UN-BOBBED. Raw worldPos (= mat3(gbufferModelViewInverse)*viewPos) is relative to the
+# BOBBING eye — view bobbing is baked into gbufferModelView — while our SSBO subtracts the un-bobbed
+# camera. The mismatch is exactly the view bob, so the light swam with the first-person hand and, under
+# IterationRP's TAA, that swim read as the light flickering whenever the player moved. Adding
+# gbufferModelViewInverse[3].xyz cancels the bob (worldPos carries +bob, MVI[3] carries -bob) and lands
+# in the un-bobbed eye-relative space our SSBO uses — the exact expression IRLite feeds its light pass.
+# (Complementary's own playerPos is already un-bobbed, which is why it never showed this.)
+# Smoothness = 1 - sqrt(roughness).
+
+@target IterationRP
+
+@patch Lib/Programs/Composite/Soild_FS.glsl
+@after #include "/Lib/BasicFunctions/HeldLight.glsl"
+<<<
+/* TAA-jitter-stable surface point. The gbuffer depth is sampled at the TAA-jittered sub-pixel,
+   so the reconstructed surface point walks ~+-1mm along the surface across the jitter phases;
+   the mm-density actor shadow map reads the walk as shimmer, and the pool's attenuation reads
+   it as the light's "дрожь". Project the point back onto the pixel-center ray along the
+   surface plane — canonical, phase-invariant. The plane comes from DEPTH DERIVATIVES, not the
+   gbuffer normal: IterationRP's normals are octahedral-quantised (~1.4° cells), and a 1.4°
+   plane error already throws the projection off by millimetres. Clamped at 3mm: past that the
+   pixel is a real edge and the plane guess hurts more than the walk. Returns the point in
+   worldPos space — the caller adds gbufferModelViewInverse[3].xyz for the un-bobbed frame. */
+vec3 vfxJitterStable(vec3 worldPos, vec3 nWorld, vec2 vfxTexCoord, ivec2 vfxTexel, out float vfxCorrMag)
+{
+    vfxCorrMag = -1.0;
+
+    vec3 vfxViewRay0 = ViewPos_From_ScreenPos_Raw(vfxTexCoord, 1.0);
+    vec3 vfxRay = normalize(mat3(gbufferModelViewInverse) * vfxViewRay0);
+
+    float vfxDen = dot(vfxRay, nWorld);
+
+    /* Guard lowered 0.35 -> 0.15: at 0.35 every grazing surface — i.e. the whole floor a few
+       blocks out — fell back to the raw walked position, which read as the distance "дрожь"
+       (fine up close, crawling far). The cap below already bounds the projection error at
+       small denominators, so correction stays safe until the ray is nearly parallel. */
+    if (abs(vfxDen) <= 0.15)
+    {
+        return worldPos;
+    }
+
+    /* Plane through the walked point with the GBUFFER normal: quantized (~1.4° cells) but
+       STATIC frame-to-frame, and that is the trade that matters — the canonical point is a
+       ray-plane intersection through a shared anchor ~1mm away, so the quantisation costs
+       ~0.02mm of constant (invisible) offset, while a depth-derivative plane WOBBLES with
+       the jittered neighbour positions and hands the whole walk back (measured: the
+       "green" corrected zones flickered exactly with that plane). */
+    vec3 vfxCanon = vfxRay * (dot(worldPos, nWorld) / vfxDen);
+    vec3 vfxDelta = vfxCanon - worldPos;
+    float vfxCorr = length(vfxDelta);
+
+    /* CAP the correction, never accept/reject it: a binary clamp at the jitter-footprint
+       limit flipped pixels between the canonical and the raw position frame to frame — the
+       "flickers only in the green zones" report, the green being exactly the clamp-boundary
+       pixels. Capping the delta to the adaptive limit (2.5x the estimated walk, growing
+       linearly with distance) keeps interiors fully corrected and edges bounded, with no
+       per-frame decision to flip. */
+    /* Pixel angular footprint WITHOUT projection uniforms: 0.7.7 keeps the mat4
+       (gbufferProjectionInverse[0][0]) while 0.8.x packs vec4s (gbufferProjectionInverse0.x)
+       — naming either breaks the other (the deferred15 C1503 on 0.7.7). Measure the ray
+       one pixel over with the unproject helper both versions share. */
+    float vfxPixAng = max(
+        length(ViewPos_From_ScreenPos_Raw(vfxTexCoord + vec2(UNIFORM_PIXEL_SIZE.x, 0.0), 1.0) - vfxViewRay0),
+        length(ViewPos_From_ScreenPos_Raw(vfxTexCoord + vec2(0.0, UNIFORM_PIXEL_SIZE.y), 1.0) - vfxViewRay0))
+        / length(vfxViewRay0);
+    float vfxWalk = length(worldPos) * vfxPixAng;
+    float vfxLimit = max(0.003, vfxWalk * 2.5);
+    float vfxScale = vfxCorr > 0.0001 ? min(vfxCorr, vfxLimit) / vfxCorr : 0.0;
+
+    vfxCorrMag = vfxCorr * vfxScale;
+
+    return worldPos + vfxDelta * vfxScale;
+}
+
+#include "/lib/vfxlights_lights.glsl"
+>>>
+@after if (isMetal) imageStore(colorimg4, texelCoord, vec4(sunlightSpecular + textureLighting * gbuffer.albedo, 0.0));
+<<<
+			vec3 vfxDiffuse; vec3 vfxSpec;
+			// Contour edge masks (IRLite-style): one-sided second difference of linear depth,
+			// four opposite tap pairs per radius (diagonals at 0.707 of the axial radius). TWO
+			// radii, 2 px and 4 px, passed RAW: the mask is shared by every lamp, but outline
+			// width and blur are PER-LIGHT dials — the shader blends the two scores by the width
+			// and applies the final window by the blur. Strictly one-sided (a pair scores only
+			// when the centre pixel is NEARER than both taps): a background pixel beside the
+			// silhouette is always farther than its pair and scores zero, so the ink never steps
+			// off the object — diagonals included. Cost: 16 depth taps per pixel instead of 8,
+			// once per frame for all lamps. depthtex1 (hand-free — the hand-bleed lesson);
+			// texelCoord is already integer pixel space. Linear depth comes from the pack's OWN
+			// LinearDepth_From_ScreenDepth (GbufferTransforms.glsl): the hand-rolled
+			// (2*near)/(far+near−d·(far−near)) this replaced was short a ×far, so zC ran a
+			// hundredfold small and the inner contour's absolute thresholds never fired in
+			// the pack while the vanilla fallback's were fine (the exterior's relative form
+			// had masked the scale bug — it cancels out).
+			float vfxEdge2 = 0.0;
+			float vfxEdge4 = 0.0;
+			float vfxEdgeIn = 0.0;
+			{
+				float vfxZc = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord, 0).x);
+				float vfxZ1 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(2, 0), 0).x);
+				float vfxZ2 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(2, 0), 0).x);
+				float vfxZ3 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(0, 2), 0).x);
+				float vfxZ4 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(0, 2), 0).x);
+				float vfxZ5 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(1, 1), 0).x);
+				float vfxZ6 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(1, 1), 0).x);
+				float vfxZ7 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(1, -1), 0).x);
+				float vfxZ8 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(1, -1), 0).x);
+
+				vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ1 + vfxZ2 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ3 + vfxZ4 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ5 + vfxZ6 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ7 + vfxZ8 - 2.0 * vfxZc) / vfxZc);
+
+				float vfxW1 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(4, 0), 0).x);
+				float vfxW2 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(4, 0), 0).x);
+				float vfxW3 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(0, 4), 0).x);
+				float vfxW4 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(0, 4), 0).x);
+				float vfxW5 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(2, 2), 0).x);
+				float vfxW6 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(2, 2), 0).x);
+				float vfxW7 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(2, -2), 0).x);
+				float vfxW8 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(2, -2), 0).x);
+
+				vfxEdge4 += smoothstep(0.05, 0.10, (vfxW1 + vfxW2 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge4 += smoothstep(0.05, 0.10, (vfxW3 + vfxW4 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge4 += smoothstep(0.05, 0.10, (vfxW5 + vfxW6 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge4 += smoothstep(0.05, 0.10, (vfxW7 + vfxW8 - 2.0 * vfxZc) / vfxZc);
+
+				/* Interior (in-geometry) edges from the r=2 taps — windowed abs, see
+				   vfxInteriorPair in the shared include: no extra depth reads. */
+				vfxEdgeIn += vfxInteriorPair(vfxZ1, vfxZ2, vfxZc);
+				vfxEdgeIn += vfxInteriorPair(vfxZ3, vfxZ4, vfxZc);
+				vfxEdgeIn += vfxInteriorPair(vfxZ5, vfxZ6, vfxZc);
+				vfxEdgeIn += vfxInteriorPair(vfxZ7, vfxZ8, vfxZc);
+			}
+			// ★POSITION = worldPos + gbufferModelViewInverse[3].xyz, for BOTH lighting and shadow.
+			// Derivation from IterationRP's own voxel line (Soild_FS.glsl:408):
+			//   voxelPos = worldPos + MVI[3] + cameraPositionFract + voxelResolution*0.5
+			// means worldPos + MVI[3] is the fragment relative to the EXACT camera (eye), bob-free —
+			// which is EXACTLY our SSBO convention (light - camera.getPos()) and the shadow matrix's
+			// (pre-translated by the same camera). It is also the literal expression IterationRP feeds
+			// its OWN ShadowTracing (line 494).
+			// The old "- vec3(0,1.62,0)" eye-height fudge was a 1.62-BLOCK vertical error: it projected
+			// the shadow low and falsely darkened the BOTTOM half of every pool (probe: cyan lower half,
+			// R=0=shadowed, gone when the lamp was raised). Raw worldPos removed the error but reintroduced
+			// the view bob (the boundary swam like the first-person hand). worldPos + MVI[3] is both:
+			// bob-free AND correctly aligned.
+			float vfxCorr;
+			vec3 vfxPos = vfxJitterStable(worldPos, gbuffer.vertexNormal, texCoord, texelCoord, vfxCorr) + gbufferModelViewInverse[3].xyz;
+			/* The ink blend destination must be the COMPOSED pixel colour: `color` here is still
+			   pre-albedo irradiance (the pack multiplies by gbuffer.albedo two lines later), and a
+			   screen/overlay against it degenerated to additive in dark scenes — the "blend mode не
+			   работает" report. color × albedo is the pixel's lit colour to within textureLighting. */
+			vfxlights_apply(vfxPos, vfxPos, gbuffer.worldNormal, gbuffer.vertexNormal,
+				1.0 - sqrt(clamp(gbuffer.material.roughness, 0.0, 1.0)), vfxEdge2, vfxEdge4, vfxEdgeIn, color * gbuffer.albedo, vfxDiffuse, vfxSpec);
+			color += vfxDiffuse;
+			sunlightSpecular += vfxSpec;
+>>>
+@after if (isMetal) imageStore(FBIMG_SST_TEMPORAL, texelCoord, vec4(sunlightSpecular + textureLighting * gbuffer.albedo, 0.0));
+<<<
+			vec3 vfxDiffuse; vec3 vfxSpec;
+			// Same light block as the colorimg4 anchor above — see that block for the full
+			// commentary (edge-mask rationale, the un-bobbed position derivation). v0.8.23
+			// renamed the buffer to FBIMG_SST_TEMPORAL; the data around it is unchanged.
+			float vfxEdge2 = 0.0;
+			float vfxEdge4 = 0.0;
+			float vfxEdgeIn = 0.0;
+			{
+				float vfxZc = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord, 0).x);
+				float vfxZ1 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(2, 0), 0).x);
+				float vfxZ2 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(2, 0), 0).x);
+				float vfxZ3 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(0, 2), 0).x);
+				float vfxZ4 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(0, 2), 0).x);
+				float vfxZ5 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(1, 1), 0).x);
+				float vfxZ6 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(1, 1), 0).x);
+				float vfxZ7 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(1, -1), 0).x);
+				float vfxZ8 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(1, -1), 0).x);
+
+				vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ1 + vfxZ2 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ3 + vfxZ4 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ5 + vfxZ6 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ7 + vfxZ8 - 2.0 * vfxZc) / vfxZc);
+
+				float vfxW1 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(4, 0), 0).x);
+				float vfxW2 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(4, 0), 0).x);
+				float vfxW3 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(0, 4), 0).x);
+				float vfxW4 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(0, 4), 0).x);
+				float vfxW5 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(2, 2), 0).x);
+				float vfxW6 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(2, 2), 0).x);
+				float vfxW7 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord + ivec2(2, -2), 0).x);
+				float vfxW8 = LinearDepth_From_ScreenDepth(texelFetch(depthtex1, texelCoord - ivec2(2, -2), 0).x);
+
+				vfxEdge4 += smoothstep(0.05, 0.10, (vfxW1 + vfxW2 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge4 += smoothstep(0.05, 0.10, (vfxW3 + vfxW4 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge4 += smoothstep(0.05, 0.10, (vfxW5 + vfxW6 - 2.0 * vfxZc) / vfxZc);
+				vfxEdge4 += smoothstep(0.05, 0.10, (vfxW7 + vfxW8 - 2.0 * vfxZc) / vfxZc);
+
+				/* Interior (in-geometry) edges from the r=2 taps — windowed abs, see
+				   vfxInteriorPair in the shared include: no extra depth reads. */
+				vfxEdgeIn += vfxInteriorPair(vfxZ1, vfxZ2, vfxZc);
+				vfxEdgeIn += vfxInteriorPair(vfxZ3, vfxZ4, vfxZc);
+				vfxEdgeIn += vfxInteriorPair(vfxZ5, vfxZ6, vfxZc);
+				vfxEdgeIn += vfxInteriorPair(vfxZ7, vfxZ8, vfxZc);
+			}
+			float vfxCorr;
+			vec3 vfxPos = vfxJitterStable(worldPos, gbuffer.vertexNormal, texCoord, texelCoord, vfxCorr) + gbufferModelViewInverse[3].xyz;
+			// Blend destination = color × gbuffer.albedo, like the colorimg4 block above:
+			// pre-albedo `color` made screen/overlay degenerate to additive.
+			vfxlights_apply(vfxPos, vfxPos, gbuffer.worldNormal, gbuffer.vertexNormal,
+				1.0 - sqrt(clamp(gbuffer.material.roughness, 0.0, 1.0)), vfxEdge2, vfxEdge4, vfxEdgeIn, color * gbuffer.albedo, vfxDiffuse, vfxSpec);
+			color += vfxDiffuse;
+			sunlightSpecular += vfxSpec;
+>>>

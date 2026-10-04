@@ -1,0 +1,31 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "com.bbsvfx.vfxlights.mixin.client",
+	"plugin": "com.bbsvfx.vfxlights.mixin.client.VfxLightsMixinPlugin",
+	"compatibilityLevel": "JAVA_17",
+	"client": [
+		"BaseFilmControllerAccessor",
+		"BBSRenderingIrisAccessor",
+		"BBSRenderingMixin",
+		"BlockFormRendererMixin",
+		"FilmsAccessor",
+		"FormPickerMixin",
+		"GameRendererAccessor",
+		"InGameHudMixin",
+		"MinecraftClientMixin",
+		"ModelBlockEntityRenderMixin",
+		"ReplayMixin",
+		"UIDataDashboardPanelAccessor",
+		"UIFilmControllerMixin",
+		"UIModelBlockPanelMixin",
+		"UIPickableFormRendererMixin",
+		"UIReplayPropertiesPanelMixin",
+		"WorldBlockChangeMixin",
+		"iris.IrisSamplersMixin",
+		"iris.IrisSourceMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

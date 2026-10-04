@@ -1,0 +1,21 @@
+{
+    "blend": {
+        "func": "add",
+        "srcrgb": "one",
+        "dstrgb": "one",
+        "srcalpha": "zero",
+        "dstalpha": "one"
+    },
+    "vertex": "vfxlights:light_dust",
+    "fragment": "vfxlights:light_dust",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [
+        { "name": "DepthSampler" }
+    ],
+    "uniforms": [
+        { "name": "OrbScreen", "type": "float", "count": 4, "values": [ 0.0, 0.0, 1.0, 0.0 ] },
+        { "name": "OrbColor", "type": "float", "count": 3, "values": [ 1.0, 1.0, 1.0 ] }
+    ]
+}

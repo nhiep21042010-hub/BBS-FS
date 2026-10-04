@@ -1,70 +1,90 @@
 {
-    "schemaVersion": 1,
-    "id": "bbs",
-    "version": "${version}",
-    "name": "BBS FS mod",
-    "description": "A new generation of video production mod",
-    "authors": [
-        "McHorse",
-        "Wemppy"
+  "schemaVersion": 1,
+  "id": "bbs",
+  "version": "2.7-1.20.4",
+  "name": "BBS FS mod",
+  "description": "A new generation of video production mod",
+  "authors": [
+    "McHorse",
+    "Wemppy"
+  ],
+  "contributors": [
+    "Chryfi (tracker clip)",
+    "FunkyFight (minor features and bug fixes)",
+    "ElGatoPro300 (bug fixes)",
+    "McMiro (Arabic translations)",
+    "Chunk7 (Chinese translations)",
+    "CheesyKirah (German translations)",
+    "aoa (Korean translations)",
+    "Nioum (French translations)",
+    "csabee (Hungarian translations)",
+    "Nikashi33 (Indonesian translations)",
+    "Legoego19 (Polish translations)",
+    "Fanyel (Portuguese translations)",
+    "El_Redstoniano (Spanish translations)",
+    "Sam Su~ (Thai translations)",
+    "Rüyaperest (Turkish translations)",
+    "Kirkus (Ukrainian translations)",
+    "Eleeter (Urdu translations)",
+    "Diobede (Vietnamese translations)",
+    "Xavin (BBS VFX: smear, impact frames, destruction, curves)",
+    "Xavin (VFX LIGHTS: point, spot, area, ambient lights)"
+  ],
+  "contact": {
+    "homepage": "https://www.patreon.com/McHorse"
+  },
+  "license": "MIT",
+  "icon": "assets/bbs/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "mchorse.bbs_mod.BBSMod",
+      "com.bbsvfx.bbsvfx.BbsVfxMain",
+      "com.bbsvfx.vfxlights.VfxLightsMain"
     ],
-    "contributors": [
-        "Chryfi (tracker clip)",
-        "FunkyFight (minor features and bug fixes)",
-        "ElGatoPro300 (bug fixes)",
-        "McMiro (Arabic translations)",
-        "Chunk7 (Chinese translations)",
-        "CheesyKirah (German translations)",
-        "aoa (Korean translations)",
-        "Nioum (French translations)",
-        "csabee (Hungarian translations)",
-        "Nikashi33 (Indonesian translations)",
-        "Legoego19 (Polish translations)",
-        "Fanyel (Portuguese translations)",
-        "El_Redstoniano (Spanish translations)",
-        "Sam Su~ (Thai translations)",
-        "Rüyaperest (Turkish translations)",
-        "Kirkus (Ukrainian translations)",
-        "Eleeter (Urdu translations)",
-        "Diobede (Vietnamese translations)",
-        "Xavin (BBS VFX: smear, impact frames, destruction, curves)"
+    "client": [
+      "mchorse.bbs_mod.BBSModClient",
+      "com.bbsvfx.bbsvfx.client.BbsVfxClient",
+      "com.bbsvfx.vfxlights.client.VfxLightsClient"
     ],
-    "contact": {
-        "homepage": "https://www.patreon.com/McHorse"
+    "bbs-addon": [
+      "com.bbsvfx.bbsvfx.BbsVfxAddon",
+      "com.bbsvfx.vfxlights.VfxLightsAddon"
+    ],
+    "vfx-module": [
+      "com.bbsvfx.vfxlights.VfxLightsModule"
+    ]
+  },
+  "mixins": [
+    "bbs.mixins.json",
+    {
+      "config": "bbs.client.mixins.json",
+      "environment": "client"
     },
-    "license": "MIT",
-    "icon": "assets/bbs/icon.png",
-    "environment": "*",
-    "entrypoints": {
-        "main": [
-            "mchorse.bbs_mod.BBSMod",
-            "com.bbsvfx.bbsvfx.BbsVfxMain"
-        ],
-        "client": [
-            "mchorse.bbs_mod.BBSModClient",
-            "com.bbsvfx.bbsvfx.client.BbsVfxClient"
-        ],
-        "bbs-addon": [
-            "com.bbsvfx.bbsvfx.BbsVfxAddon"
-        ]
+    "bbsvfx.mixins.json",
+    {
+      "config": "bbsvfx.client.mixins.json",
+      "environment": "client"
     },
-    "mixins": [
-        "bbs.mixins.json",
-        {
-            "config": "bbs.client.mixins.json",
-            "environment": "client"
-        },
-        "bbsvfx.mixins.json",
-        {
-            "config": "bbsvfx.client.mixins.json",
-            "environment": "client"
-        }
-    ],
-    "accessWidener": "bbs.accesswidener",
-    "depends": {
-        "fabricloader": ">=0.15.0",
-        "minecraft": "~1.20.4",
-        "java": ">=17",
-        "fabric-api": "*"
+    "vfxlights.mixins.json",
+    {
+      "config": "vfxlights.client.mixins.json",
+      "environment": "client"
     }
+  ],
+  "accessWidener": "bbs.accesswidener",
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.20.4",
+    "java": ">=17",
+    "fabric-api": "*"
+  },
+  "jars": [
+    {
+      "file": "META-INF/jars/physx-jni-2.7.1-natives-windows.jar"
+    },
+    {
+      "file": "META-INF/jars/physx-jni-2.7.1.jar"
+    }
+  ]
 }

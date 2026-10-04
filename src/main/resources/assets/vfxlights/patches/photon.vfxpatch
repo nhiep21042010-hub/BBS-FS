@@ -1,0 +1,89 @@
+# VFX LIGHTS patch for photon (v1.3b). Anchors are lines from the clean zip; if one is reported
+# missing, the pack version moved it.
+#
+# photon is a wrapper-scheme pack: world{0,-1,1}/deferred4.fsh are five-line stubs, all logic
+# lives in program/ — patching d4_deferred_shading.fsh once covers every dimension. d4 is the
+# only pass that unpacks the opaque gbuffer and assembles the shaded colour. The pack's albedo
+# multiply happens INSIDE get_diffuse_lighting (material.albedo * rcp_pi), so the light block
+# goes right after that call — before the specular-highlight block — and adds diffuse with the
+# pack's own energy convention; our specular rides on top of it.
+#
+# Normals arrive WORLD-axes (the gbuffer stores viewToWorld) — passed straight in.
+# position_scene = transform(gbufferModelViewInverse, position_view): the same un-bobbed
+# eye-relative expression IterationRP proved out, so NO bob correction is applied here.
+# smoothness = 1 - sqrt(roughness) (lab-PBR: roughness = sqr(1 - specular_map.r)).
+# photon has no SSBO of its own — binding 5 is free. #version 400 gets the SSBO through the
+# #extension line our included file carries.
+# ★depthtex0 is NOT depth in this program (a 3D atmosphere scattering LUT) — the edge mask
+# reads depthtex1; linearize_depth comes from the pack's own space_conversion.glsl (included
+# above the hook), gl_FragCoord gives the pixel.
+
+@target photon
+
+@patch program/d4_deferred_shading.fsh
+@after #include "/include/global.glsl"
+<<<
+#include "/lib/vfxlights_lights.glsl"
+>>>
+@after // Specular highlight
+<<<
+	{
+		vec3 vfxDiffuse; vec3 vfxSpec;
+		// Contour edge masks (IRLite-style): one-sided second difference of linear depth,
+		// four opposite tap pairs per radius (diagonals at 0.707 of the axial radius). TWO
+		// radii, 2 px and 4 px, passed RAW: the mask is shared by every lamp, but outline
+		// width and blur are PER-LIGHT dials — the shader blends the two scores by the width
+		// and applies the final window by the blur. Strictly one-sided (a pair scores only
+		// when the centre pixel is NEARER than both taps): a background pixel beside the
+		// silhouette is always farther than its pair and scores zero, so the ink never steps
+		// off the object — diagonals included. Cost: 16 depth taps per pixel instead of 8,
+		// once per frame for all lamps. Linear depth = the pack's own linearize_depth
+		// (space_conversion.glsl) — the hand-rolled formula this replaced was short a ×far,
+		// which left the inner contour's absolute thresholds unreachable in the pack.
+		float vfxEdge2 = 0.0;
+		float vfxEdge4 = 0.0;
+		float vfxEdgeIn = 0.0;
+		{
+			ivec2 vfxTc = ivec2(gl_FragCoord.xy);
+			float vfxZc = linearize_depth(texelFetch(depthtex1, vfxTc, 0).x);
+			float vfxZ1 = linearize_depth(texelFetch(depthtex1, vfxTc + ivec2(2, 0), 0).x);
+			float vfxZ2 = linearize_depth(texelFetch(depthtex1, vfxTc - ivec2(2, 0), 0).x);
+			float vfxZ3 = linearize_depth(texelFetch(depthtex1, vfxTc + ivec2(0, 2), 0).x);
+			float vfxZ4 = linearize_depth(texelFetch(depthtex1, vfxTc - ivec2(0, 2), 0).x);
+			float vfxZ5 = linearize_depth(texelFetch(depthtex1, vfxTc + ivec2(1, 1), 0).x);
+			float vfxZ6 = linearize_depth(texelFetch(depthtex1, vfxTc - ivec2(1, 1), 0).x);
+			float vfxZ7 = linearize_depth(texelFetch(depthtex1, vfxTc + ivec2(1, -1), 0).x);
+			float vfxZ8 = linearize_depth(texelFetch(depthtex1, vfxTc - ivec2(1, -1), 0).x);
+
+			vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ1 + vfxZ2 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ3 + vfxZ4 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ5 + vfxZ6 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ7 + vfxZ8 - 2.0 * vfxZc) / vfxZc);
+
+			float vfxW1 = linearize_depth(texelFetch(depthtex1, vfxTc + ivec2(4, 0), 0).x);
+			float vfxW2 = linearize_depth(texelFetch(depthtex1, vfxTc - ivec2(4, 0), 0).x);
+			float vfxW3 = linearize_depth(texelFetch(depthtex1, vfxTc + ivec2(0, 4), 0).x);
+			float vfxW4 = linearize_depth(texelFetch(depthtex1, vfxTc - ivec2(0, 4), 0).x);
+			float vfxW5 = linearize_depth(texelFetch(depthtex1, vfxTc + ivec2(2, 2), 0).x);
+			float vfxW6 = linearize_depth(texelFetch(depthtex1, vfxTc - ivec2(2, 2), 0).x);
+			float vfxW7 = linearize_depth(texelFetch(depthtex1, vfxTc + ivec2(2, -2), 0).x);
+			float vfxW8 = linearize_depth(texelFetch(depthtex1, vfxTc - ivec2(2, -2), 0).x);
+
+			vfxEdge4 += smoothstep(0.05, 0.10, (vfxW1 + vfxW2 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge4 += smoothstep(0.05, 0.10, (vfxW3 + vfxW4 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge4 += smoothstep(0.05, 0.10, (vfxW5 + vfxW6 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge4 += smoothstep(0.05, 0.10, (vfxW7 + vfxW8 - 2.0 * vfxZc) / vfxZc);
+
+			/* Interior (in-geometry) edges from the r=2 taps — windowed abs, see
+			   vfxInteriorPair in the shared include: no extra depth reads. */
+			vfxEdgeIn += vfxInteriorPair(vfxZ1, vfxZ2, vfxZc);
+			vfxEdgeIn += vfxInteriorPair(vfxZ3, vfxZ4, vfxZc);
+			vfxEdgeIn += vfxInteriorPair(vfxZ5, vfxZ6, vfxZc);
+			vfxEdgeIn += vfxInteriorPair(vfxZ7, vfxZ8, vfxZc);
+		}
+		vfxlights_apply(position_scene, position_scene, normal, flat_normal,
+			1.0 - sqrt(clamp(material.roughness, 0.0, 1.0)), vfxEdge2, vfxEdge4, vfxEdgeIn, fragment_color, vfxDiffuse, vfxSpec);
+		fragment_color += vfxDiffuse * material.albedo * rcp_pi;
+		fragment_color += vfxSpec;
+	}
+>>>

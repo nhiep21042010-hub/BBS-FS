@@ -1,0 +1,14 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "com.bbsvfx.vfxlights.mixin",
+	"compatibilityLevel": "JAVA_17",
+	"mixins": [
+		"BBSSettingsMixin",
+		"FormsMixin",
+		"ValueGroupRemoveMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

@@ -1,0 +1,153 @@
+# VFX LIGHTS patch for Complementary Reimagined / Unbound r5.8.1.
+# Anchors are lines from the CLEAN pack; if one is reported missing, the pack version moved it.
+#
+# The light math lives in the SHARED /lib/vfxlights_lights.glsl (served by PackPatcher for every pack).
+# Complementary's DoLighting works in VIEW space, so this patch alone rotates the normals into the
+# world space the shared code expects — the deferred packs pass their world-space gbuffer normals raw.
+
+# "Complementary" matches Reimagined and Unbound alike — r5.8.1 shares the lighting library.
+@target Complementary
+
+@patch lib/lighting/mainLighting.glsl
+@after #include "/lib/lighting/ggx.glsl"
+<<<
+#include "/lib/vfxlights_lights.glsl"
+>>>
+@after     finalDiffuse = sqrt(max(finalDiffuse, vec3(0.0))); // sqrt() for a bit more realistic light mix, max() to prevent NaNs
+<<<
+
+    vec3 vfxDiffuse; vec3 vfxSpec;
+    /* Canonicalise playerPos against the TAA jitter before the mm actor map reads it: the
+       gbuffers vertex stage offsets gl_Position per frame (lib/antialiasing/jitter.glsl — the
+       projection MATRIX stays unjittered, so the pixel-centre ray from gbufferProjectionInverse
+       is phase-invariant), and the interpolated fragment position walks within the pixel
+       footprint across the 8-frame cycle — the second layer read the walk as дрожание, and the
+       pack's own TAA then smeared it soft ("Complementary: 2-й слой мыльный и дрожит, на
+       IterationRP чётко и статично" — that pack canonicalises at its hook, and Eclipse's own
+       reconstruction is already un-jittered). Project the walked point back onto the
+       pixel-centre ray along the surface plane, capped adaptively like the Eclipse version —
+       a binary clamp flipped pixels frame to frame. DH/voxy programs neither declare
+       gbufferProjectionInverse nor carry BBS actors — they keep the raw point. */
+#if !defined DH_TERRAIN && !defined DH_WATER && !defined VOXY
+    {
+        vec4 vfxPrj = vec4(gbufferProjectionInverse[0].x, gbufferProjectionInverse[1].y,
+            gbufferProjectionInverse[2].zw);
+        vec2 vfxPx = 1.0 / vec2(viewWidth, viewHeight);
+        vec2 vfxUv0 = (floor(gl_FragCoord.xy) + 0.5) * vfxPx;
+        vec4 vfxV0 = vfxPrj * (vec3(vfxUv0, 1.0) * 2.0 - 1.0).xyzz + gbufferProjectionInverse[3];
+        vec4 vfxV1 = vfxPrj * (vec3(vfxUv0 + vec2(vfxPx.x, 0.0), 1.0) * 2.0 - 1.0).xyzz
+            + gbufferProjectionInverse[3];
+        vec3 vfxRay = normalize(mat3(gbufferModelViewInverse) * (vfxV0.xyz / vfxV0.w));
+        vec3 vfxN = mat3(gbufferModelViewInverse) * geoNormal;
+        float vfxDen = dot(vfxRay, vfxN);
+
+        if (abs(vfxDen) > 0.15)
+        {
+            vec3 vfxCanon = vfxRay * (dot(playerPos, vfxN) / vfxDen);
+            vec3 vfxDelta = vfxCanon - playerPos;
+            float vfxCorr = length(vfxDelta);
+            float vfxPixAng = length(normalize(vfxV1.xyz / vfxV1.w) - normalize(vfxV0.xyz / vfxV0.w));
+            float vfxLimit = max(0.003, length(playerPos) * vfxPixAng * 2.5);
+            float vfxScale = vfxCorr > 0.0001 ? min(vfxCorr, vfxLimit) / vfxCorr : 0.0;
+
+            playerPos += vfxDelta * vfxScale;
+        }
+    }
+#endif
+
+    // Edge mask 0.0: this call site is a library shared by ~13 programs (gbuffers included), and
+    // only deferred1 declares a depth sampler — a second-difference edge mask has no depth to read
+    // here without breaking the gbuffers programs. The contour ink is added by the deferred1
+    // section below instead; this site delivers the light itself.
+    vfxlights_apply(playerPos, playerPos, mat3(gbufferModelViewInverse) * normalM,
+        mat3(gbufferModelViewInverse) * geoNormal, smoothnessG, 0.0, 0.0, 0.0, vec3(0.0), vfxDiffuse, vfxSpec);
+    finalDiffuse += vfxDiffuse;
+>>>
+@after     color.rgb += lightHighlight;
+<<<
+    color.rgb += vfxSpec;
+>>>
+
+# Contour ink hook: the mainLighting site above is a library shared by ~13 programs (gbuffers
+# included) and has no readable depth there, so the edge mask — and the ink — has to live in
+# deferred1, the one pass that assembles opaque colour with depth at hand. One program file serves
+# every dimension (world-1/0/1 stubs all include it), so a single patch covers all three.
+# The LIGHT is NOT added here again: deferred1 runs after the gbuffers already shaded every opaque
+# pixel through the hook above — only the ink-only entry is called, or every lamp would be doubled.
+@patch program/deferred1.glsl
+@after #include "/lib/util/spaceConversion.glsl"
+<<<
+#include "/lib/vfxlights_lights.glsl"
+>>>
+@after         color.rgb *= ssao;
+<<<
+    {
+        // Contour edge masks (IRLite-style): one-sided second difference of linear depth,
+        // four opposite tap pairs per radius (diagonals at 0.707 of the axial radius). TWO
+        // radii, 2 px and 4 px, passed RAW: the mask is shared by every lamp, but outline
+        // width and blur are PER-LIGHT dials — the shader blends the two scores by the width
+        // and applies the final window by the blur. Strictly one-sided (a pair scores only
+        // when the centre pixel is NEARER than both taps): a background pixel beside the
+        // silhouette is always farther than its pair and scores zero, so the ink never steps
+        // off the object — diagonals included. Cost: 16 depth taps per pixel instead of 8,
+        // once per frame for all lamps. depthtex1 == depthtex0 here (the hand is not drawn
+        // yet) and near/far come from lib/uniforms.glsl; texelCoord is already integer pixel
+        // space, GetLinearDepth is this file's own — times `far`: Complementary's helper is
+        // the ×far-short form (the pack itself multiplies by far where it needs world units,
+        // see darkOutline.glsl), and without it the interior fold window (hi = 0.12·zC) sat
+        // a thousandfold too small and gated every fold out ("нет inner на Complementary").
+        float vfxZc = GetLinearDepth(texelFetch(depthtex1, texelCoord, 0).x) * far;
+        float vfxZ1 = GetLinearDepth(texelFetch(depthtex1, texelCoord + ivec2(2, 0), 0).x) * far;
+        float vfxZ2 = GetLinearDepth(texelFetch(depthtex1, texelCoord - ivec2(2, 0), 0).x) * far;
+        float vfxZ3 = GetLinearDepth(texelFetch(depthtex1, texelCoord + ivec2(0, 2), 0).x) * far;
+        float vfxZ4 = GetLinearDepth(texelFetch(depthtex1, texelCoord - ivec2(0, 2), 0).x) * far;
+        float vfxZ5 = GetLinearDepth(texelFetch(depthtex1, texelCoord + ivec2(1, 1), 0).x) * far;
+        float vfxZ6 = GetLinearDepth(texelFetch(depthtex1, texelCoord - ivec2(1, 1), 0).x) * far;
+        float vfxZ7 = GetLinearDepth(texelFetch(depthtex1, texelCoord + ivec2(1, -1), 0).x) * far;
+        float vfxZ8 = GetLinearDepth(texelFetch(depthtex1, texelCoord - ivec2(1, -1), 0).x) * far;
+        float vfxEdge2 = 0.0;
+        float vfxEdge4 = 0.0;
+        float vfxEdgeIn = 0.0;
+
+        vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ1 + vfxZ2 - 2.0 * vfxZc) / vfxZc);
+        vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ3 + vfxZ4 - 2.0 * vfxZc) / vfxZc);
+        vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ5 + vfxZ6 - 2.0 * vfxZc) / vfxZc);
+        vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ7 + vfxZ8 - 2.0 * vfxZc) / vfxZc);
+
+        float vfxW1 = GetLinearDepth(texelFetch(depthtex1, texelCoord + ivec2(4, 0), 0).x) * far;
+        float vfxW2 = GetLinearDepth(texelFetch(depthtex1, texelCoord - ivec2(4, 0), 0).x) * far;
+        float vfxW3 = GetLinearDepth(texelFetch(depthtex1, texelCoord + ivec2(0, 4), 0).x) * far;
+        float vfxW4 = GetLinearDepth(texelFetch(depthtex1, texelCoord - ivec2(0, 4), 0).x) * far;
+        float vfxW5 = GetLinearDepth(texelFetch(depthtex1, texelCoord + ivec2(2, 2), 0).x) * far;
+        float vfxW6 = GetLinearDepth(texelFetch(depthtex1, texelCoord - ivec2(2, 2), 0).x) * far;
+        float vfxW7 = GetLinearDepth(texelFetch(depthtex1, texelCoord + ivec2(2, -2), 0).x) * far;
+        float vfxW8 = GetLinearDepth(texelFetch(depthtex1, texelCoord - ivec2(2, -2), 0).x) * far;
+
+        vfxEdge4 += smoothstep(0.05, 0.10, (vfxW1 + vfxW2 - 2.0 * vfxZc) / vfxZc);
+        vfxEdge4 += smoothstep(0.05, 0.10, (vfxW3 + vfxW4 - 2.0 * vfxZc) / vfxZc);
+        vfxEdge4 += smoothstep(0.05, 0.10, (vfxW5 + vfxW6 - 2.0 * vfxZc) / vfxZc);
+        vfxEdge4 += smoothstep(0.05, 0.10, (vfxW7 + vfxW8 - 2.0 * vfxZc) / vfxZc);
+
+        // Interior (in-geometry) edges from the r=2 taps — windowed abs, see vfxInteriorPair
+        // in the shared include: no extra depth reads.
+        vfxEdgeIn += vfxInteriorPair(vfxZ1, vfxZ2, vfxZc);
+        vfxEdgeIn += vfxInteriorPair(vfxZ3, vfxZ4, vfxZc);
+        vfxEdgeIn += vfxInteriorPair(vfxZ5, vfxZ6, vfxZc);
+        vfxEdgeIn += vfxInteriorPair(vfxZ7, vfxZ8, vfxZc);
+
+        // Normal for the ink's facing test. PBR keeps the mapped normal in colortex4 as a RAW
+        // player-space vector (RGBA8_SNORM, written as mat3(gbufferModelViewInverse) * normalM by
+        // the gbuffers — no unpacking); without PBR, derive a geometric one from the position.
+        #ifdef PBR_REFLECTIONS
+            vec3 vfxN = texelFetch(colortex4, texelCoord, 0).rgb;
+        #else
+            vec3 vfxN = normalize(cross(dFdx(playerPos), dFdy(playerPos)));
+
+            if (dot(vfxN, -normalize(playerPos)) < 0.0) vfxN = -vfxN;
+        #endif
+
+        vec3 vfxInk;
+        vfxlights_ink(playerPos, vfxN, vfxEdge2, vfxEdge4, vfxEdgeIn, color.rgb, vfxInk);
+        color.rgb += vfxInk;
+    }
+>>>

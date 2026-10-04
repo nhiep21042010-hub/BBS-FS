@@ -1,0 +1,136 @@
+# VFX LIGHTS patch for Eclipse (Photon/Reimagined-lineage deferred, #version 430).
+# Rewritten from scratch against the clean "Unstable" build (dimensions/composite1.fsh,
+# 1934 lines); if an anchor is reported missing, the pack version moved it.
+#
+# composite1.fsh is the first (and only) composite that unpacks the opaque gbuffer and assembles
+# the final lit colour: FINAL_COLOR = (Indirect + Direct) * albedo. The light lands right after
+# that line, PRE-specular and pre-reflections, so it rides the pack's exposure and GI like every
+# other light; our specular is added onto the output after the pack finished mutating FINAL_COLOR.
+#
+# ★POSITION = feetPlayerPos through vfxJitterStable. The pack already applies the bob correction
+# itself (feetPlayerPos += gbufferModelViewInverse[3].xyz at line 1312 — "this seems to be
+# compensating view bobbing"), so feetPlayerPos is exactly the un-bobbed eye-relative world-axes
+# space our SSBO uses. The previous patch added gbufferModelViewInverse[3] AGAIN and subtracted
+# 1.62 for the eye — a double bob plus a 1.62-block shadow projection error (pools falsely
+# darkened at the bottom, lights swimming with the first-person hand). The jitter-stable pass
+# (ported from the IterationRP patch) then canonicalises the point against TAA, so the pool
+# stops crawling at distance — the "дрожь" on grazing floors.
+# Normals are WORLD space (normal / FlatNormals) — passed straight in. SpecularTex.r is
+# perceptual smoothness. The pack's own SSBO sits on binding 4; ours (5) is free.
+# depthtex1 (hand-free) + near/farPlane are declared in this file; gl_FragCoord gives the pixel.
+
+@target Eclipse
+
+@patch dimensions/composite1.fsh
+@after #include "/lib/settings.glsl"
+<<<
+#include "/lib/vfxlights_lights.glsl"
+>>>
+@after #include "/lib/Shadow_Params.glsl"
+<<<
+/* TAA-jitter-stable surface point (ported from the IterationRP patch). The gbuffer depth is
+   sampled at the TAA-jittered sub-pixel, so the reconstructed surface point walks within the
+   pixel footprint across the jitter phases and the light pool's attenuation reads the walk as
+   the far-distance "дрожь". Project the point back onto the pixel-center ray along the surface
+   plane (the FLAT gbuffer normal: quantized, but STATIC frame to frame — the trade that
+   matters). Eclipse already un-jitters its reconstruction via TAA_Offset, so the RAW ray (no
+   offset subtracted) is the pixel center. The cap is adaptive, never accept/reject — a binary
+   clamp flipped pixels frame to frame. Defined at file scope (nested functions are illegal
+   in GLSL — the first attempt landed inside main and failed to compile). */
+vec3 vfxJitterStable(vec3 pos, vec3 nWorld, vec2 vfxUv)
+{
+	vec3 vfxViewRay0 = toScreenSpace(vec3(vfxUv, 1.0));
+	vec3 vfxRay = normalize(mat3(gbufferModelViewInverse) * vfxViewRay0);
+
+	float vfxDen = dot(vfxRay, nWorld);
+
+	/* 0.15, not 0.35: at 0.35 every grazing floor (the whole floor a few blocks out) fell
+	   back to the raw walked position — the distance "дрожь". The cap bounds the rest. */
+	if (abs(vfxDen) <= 0.15)
+	{
+		return pos;
+	}
+
+	vec3 vfxCanon = vfxRay * (dot(pos, nWorld) / vfxDen);
+	vec3 vfxDelta = vfxCanon - pos;
+	float vfxCorr = length(vfxDelta);
+
+	/* Pixel angular footprint from the pack's own unproject, one texel over (texelSize is
+	   full-res here, so this is the TAA footprint as well). */
+	float vfxPixAng = max(
+		length(toScreenSpace(vec3(vfxUv + vec2(texelSize.x, 0.0), 1.0)) - vfxViewRay0),
+		length(toScreenSpace(vec3(vfxUv + vec2(0.0, texelSize.y), 1.0)) - vfxViewRay0))
+		/ length(vfxViewRay0);
+	float vfxWalk = length(pos) * vfxPixAng;
+	float vfxLimit = max(0.003, vfxWalk * 2.5);
+	float vfxScale = vfxCorr > 0.0001 ? min(vfxCorr, vfxLimit) / vfxCorr : 0.0;
+
+	return pos + vfxDelta * vfxScale;
+}
+>>>
+@after vec3 FINAL_COLOR = (Indirect_lighting + Direct_lighting) * albedo;
+<<<
+		vec3 vfxDiffuse; vec3 vfxSpec;
+		// Contour edge masks (IRLite-style): one-sided second difference of linear depth,
+		// four opposite tap pairs per radius (diagonals at 0.707 of the axial radius). TWO
+		// radii, 2 px and 4 px, passed RAW: the mask is shared by every lamp, but outline
+		// width and blur are PER-LIGHT dials — the shader blends the two scores by the width
+		// and applies the final window by the blur. Strictly one-sided (a pair scores only
+		// when the centre pixel is NEARER than both taps): a background pixel beside the
+		// silhouette is always farther than its pair and scores zero, so the ink never steps
+		// off the object — diagonals included. Cost: 16 depth taps per pixel instead of 8,
+		// once per frame for all lamps. Linear depth = the pack's own linearizeDepthFast
+		// (composite1.fsh): the hand-rolled formula this replaced was short a ×far (the pack
+		// even keeps that exact line commented out at its definition), which left the inner
+		// contour's absolute thresholds unreachable in the pack.
+		float vfxEdge2 = 0.0;
+		float vfxEdge4 = 0.0;
+		float vfxEdgeIn = 0.0;
+		{
+			ivec2 vfxTc = ivec2(gl_FragCoord.xy);
+			float vfxZc = linearizeDepthFast(texelFetch(depthtex1, vfxTc, 0).x, near, farPlane);
+			float vfxZ1 = linearizeDepthFast(texelFetch(depthtex1, vfxTc + ivec2(2, 0), 0).x, near, farPlane);
+			float vfxZ2 = linearizeDepthFast(texelFetch(depthtex1, vfxTc - ivec2(2, 0), 0).x, near, farPlane);
+			float vfxZ3 = linearizeDepthFast(texelFetch(depthtex1, vfxTc + ivec2(0, 2), 0).x, near, farPlane);
+			float vfxZ4 = linearizeDepthFast(texelFetch(depthtex1, vfxTc - ivec2(0, 2), 0).x, near, farPlane);
+			float vfxZ5 = linearizeDepthFast(texelFetch(depthtex1, vfxTc + ivec2(1, 1), 0).x, near, farPlane);
+			float vfxZ6 = linearizeDepthFast(texelFetch(depthtex1, vfxTc - ivec2(1, 1), 0).x, near, farPlane);
+			float vfxZ7 = linearizeDepthFast(texelFetch(depthtex1, vfxTc + ivec2(1, -1), 0).x, near, farPlane);
+			float vfxZ8 = linearizeDepthFast(texelFetch(depthtex1, vfxTc - ivec2(1, -1), 0).x, near, farPlane);
+
+			vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ1 + vfxZ2 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ3 + vfxZ4 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ5 + vfxZ6 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge2 += smoothstep(0.05, 0.10, (vfxZ7 + vfxZ8 - 2.0 * vfxZc) / vfxZc);
+
+			float vfxW1 = linearizeDepthFast(texelFetch(depthtex1, vfxTc + ivec2(4, 0), 0).x, near, farPlane);
+			float vfxW2 = linearizeDepthFast(texelFetch(depthtex1, vfxTc - ivec2(4, 0), 0).x, near, farPlane);
+			float vfxW3 = linearizeDepthFast(texelFetch(depthtex1, vfxTc + ivec2(0, 4), 0).x, near, farPlane);
+			float vfxW4 = linearizeDepthFast(texelFetch(depthtex1, vfxTc - ivec2(0, 4), 0).x, near, farPlane);
+			float vfxW5 = linearizeDepthFast(texelFetch(depthtex1, vfxTc + ivec2(2, 2), 0).x, near, farPlane);
+			float vfxW6 = linearizeDepthFast(texelFetch(depthtex1, vfxTc - ivec2(2, 2), 0).x, near, farPlane);
+			float vfxW7 = linearizeDepthFast(texelFetch(depthtex1, vfxTc + ivec2(2, -2), 0).x, near, farPlane);
+			float vfxW8 = linearizeDepthFast(texelFetch(depthtex1, vfxTc - ivec2(2, -2), 0).x, near, farPlane);
+
+			vfxEdge4 += smoothstep(0.05, 0.10, (vfxW1 + vfxW2 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge4 += smoothstep(0.05, 0.10, (vfxW3 + vfxW4 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge4 += smoothstep(0.05, 0.10, (vfxW5 + vfxW6 - 2.0 * vfxZc) / vfxZc);
+			vfxEdge4 += smoothstep(0.05, 0.10, (vfxW7 + vfxW8 - 2.0 * vfxZc) / vfxZc);
+
+			/* Interior (in-geometry) edges from the r=2 taps — windowed abs, see
+			   vfxInteriorPair in the shared include: no extra depth reads. */
+			vfxEdgeIn += vfxInteriorPair(vfxZ1, vfxZ2, vfxZc);
+			vfxEdgeIn += vfxInteriorPair(vfxZ3, vfxZ4, vfxZc);
+			vfxEdgeIn += vfxInteriorPair(vfxZ5, vfxZ6, vfxZc);
+			vfxEdgeIn += vfxInteriorPair(vfxZ7, vfxZ8, vfxZc);
+		}
+		// feetPlayerPos is already bob-corrected by the pack itself (see the header); the jitter
+		// pass canonicalises it against TAA before it feeds BOTH the lighting and the shadow.
+		vec3 vfxPos = vfxJitterStable(feetPlayerPos, FlatNormals, texcoord / RENDER_SCALE);
+		vfxlights_apply(vfxPos, vfxPos, normal, FlatNormals, SpecularTex.r, vfxEdge2, vfxEdge4, vfxEdgeIn, FINAL_COLOR, vfxDiffuse, vfxSpec);
+		FINAL_COLOR += vfxDiffuse * albedo;
+>>>
+@after gl_FragData[0].rgb = FINAL_COLOR;
+<<<
+		gl_FragData[0].rgb += vfxSpec;
+>>>

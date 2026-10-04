@@ -1,0 +1,51 @@
+{
+    "blend": {
+        "func": "add",
+        "srcrgb": "one",
+        "dstrgb": "one",
+        "srcalpha": "zero",
+        "dstalpha": "one"
+    },
+    "vertex": "vfxlights:light_volumetric",
+    "fragment": "vfxlights:light_volumetric",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [
+        { "name": "DepthSampler" },
+        { "name": "ShadowAtlas" },
+        { "name": "ShadowColor" }
+    ],
+    "uniforms": [
+        { "name": "InvViewProj", "type": "matrix4x4", "count": 16,
+          "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "LightViewProj", "type": "matrix4x4", "count": 16,
+          "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "CameraPos", "type": "float", "count": 3, "values": [ 0.0, 0.0, 0.0 ] },
+        { "name": "GameTime", "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "LightPos", "type": "float", "count": 3, "values": [ 0.0, 0.0, 0.0 ] },
+        { "name": "LightColor", "type": "float", "count": 3, "values": [ 1.0, 1.0, 1.0 ] },
+        { "name": "LightParams", "type": "float", "count": 4, "values": [ 1.0, 16.0, 0.1, 0.0 ] },
+        { "name": "LightDir", "type": "float", "count": 4, "values": [ 0.0, -1.0, 0.0, 0.7 ] },
+        { "name": "LightShape", "type": "float", "count": 4, "values": [ 0.85, 1.0, 0.0, 0.0 ] },
+        { "name": "ShadowSlot", "type": "float", "count": 4, "values": [ -1.0, 8.0, 0.05, 0.0 ] },
+        { "name": "Dispersion", "type": "float", "count": 4, "values": [ 0.0, 1.0, 0.0, -1.0 ] },
+        { "name": "LightUp", "type": "float", "count": 4, "values": [ 0.0, 0.0, 1.0, 0.0 ] },
+        { "name": "LightExtra", "type": "float", "count": 4, "values": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "LightFalloff", "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "AtlasInfo", "type": "float", "count": 4, "values": [ 1024.0, 1.0, 0.0, 0.0 ] },
+        { "name": "VolQuality", "type": "float", "count": 4, "values": [ 4.0, 16.0, 64.0, 96.0 ] },
+        { "name": "ActorSlot0", "type": "float", "count": 4, "values": [ -1.0, 0.05, 1.0, 0.0 ] },
+        { "name": "ActorSlot1", "type": "float", "count": 4, "values": [ -1.0, 0.05, 1.0, 0.0 ] },
+        { "name": "ActorSlot2", "type": "float", "count": 4, "values": [ -1.0, 0.05, 1.0, 0.0 ] },
+        { "name": "ActorSlot3", "type": "float", "count": 4, "values": [ -1.0, 0.05, 1.0, 0.0 ] },
+        { "name": "ActorViewProj0", "type": "matrix4x4", "count": 16,
+          "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "ActorViewProj1", "type": "matrix4x4", "count": 16,
+          "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "ActorViewProj2", "type": "matrix4x4", "count": 16,
+          "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "ActorViewProj3", "type": "matrix4x4", "count": 16,
+          "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] }
+    ]
+}

@@ -1,0 +1,23 @@
+{
+    "blend": {
+        "func": "add",
+        "srcrgb": "one",
+        "dstrgb": "one",
+        "srcalpha": "zero",
+        "dstalpha": "one"
+    },
+    "vertex": "vfxlights:light_volumetric_up",
+    "fragment": "vfxlights:light_volumetric_up",
+    "attributes": [
+        "Position"
+    ],
+    "samplers": [
+        { "name": "BeamSampler" },
+        { "name": "DepthSampler" },
+        { "name": "PostDepth" }
+    ],
+    "uniforms": [
+        { "name": "BeamTexel", "type": "float", "count": 2, "values": [ 0.0, 0.0 ] },
+        { "name": "HandMask", "type": "float", "count": 1, "values": [ 0.0 ] }
+    ]
+}
