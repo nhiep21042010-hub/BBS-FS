@@ -95,6 +95,20 @@ processResources {
 	filesMatching("fabric.mod.json") {
 		expand "version": project.version
 	}
+
+	/* Loom tu them danh sach "jars" luc dong goi. Neu fabric.mod.json nguon da co san thi build loi
+	 * "Cannot nest 2 jars", nen xoa muc nay o ban da xu ly. */
+	doLast {
+		def modJson = new File(destinationDir, "fabric.mod.json")
+
+		if (modJson.exists()) {
+			def parsed = new LinkedHashMap(new groovy.json.JsonSlurper().parse(modJson))
+
+			if (parsed.remove("jars") != null) {
+				modJson.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(parsed))
+			}
+		}
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {
