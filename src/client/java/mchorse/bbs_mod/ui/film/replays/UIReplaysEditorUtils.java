@@ -187,41 +187,50 @@ public class UIReplaysEditorUtils
     {
         Map<TrackId, UIKeyframeSheet> rows = new HashMap<>();
 
-        /* The pose and transform tracks come in several kinds (the form's own, plus overlays), and on
-         * a timeline that lists every part at once they all read alike. Number them in the order they
-         * are listed: "Pose 1", "Pose 2", "Transform 1"... - only when there is more than one to tell apart. */
-        int poses = 0;
-        int transforms = 0;
-
-        for (TrackDescriptor track : catalog)
-        {
-            String kind = numberedKind(track.id());
-
-            if ("pose".equals(kind)) poses += 1;
-            else if ("transform".equals(kind)) transforms += 1;
-        }
-
-        int poseNumber = 0;
-        int transformNumber = 0;
+        /* Pose and transform tracks (the form's own, plus the overlays) read alike once every part is
+         * on one timeline. They are named per family - "Pose", "Pose 1", "Pose 2"... then "Pose Overlay",
+         * "Pose Overlay 1"... then the same for Transform - and listed in exactly that order, wherever the
+         * catalog happened to put them. A track the user has renamed keeps their name. */
+        String poseWord = TrackStyle.label(TrackId.property("", "pose")).get();
+        String transformWord = TrackStyle.label(TrackId.property("", "transform")).get();
+        String[] words = {poseWord, poseWord + " Overlay", transformWord, transformWord + " Overlay"};
+        int[] counts = new int[4];
+        List<UIKeyframeSheet> familySheets = new ArrayList<>();
+        List<Integer> familySlots = new ArrayList<>();
+        List<Integer> familyOf = new ArrayList<>();
 
         for (TrackDescriptor track : catalog)
         {
             UIKeyframeSheet sheet = new UIKeyframeSheet(track);
-            String kind = numberedKind(track.id());
+            int family = familyOf(track.id());
 
-            if ("pose".equals(kind) && poses > 1)
+            if (family >= 0)
             {
-                poseNumber += 1;
-                numberSheet(sheet, TrackStyle.label(TrackId.property("", "pose")).get(), poseNumber);
-            }
-            else if ("transform".equals(kind) && transforms > 1)
-            {
-                transformNumber += 1;
-                numberSheet(sheet, TrackStyle.label(TrackId.property("", "transform")).get(), transformNumber);
+                int n = counts[family]++;
+
+                if (sheet.title == sheet.defaultTitle)
+                {
+                    sheet.title = IKey.constant(n == 0 ? words[family] : words[family] + " " + n);
+                }
+
+                familySheets.add(sheet);
+                familySlots.add(sheets.size());
+                familyOf.add(family);
             }
 
             rows.put(track.id(), sheet);
             sheets.add(sheet);
+        }
+
+        /* Reorder only these rows, into the slots they already occupy, so nothing else moves. */
+        List<UIKeyframeSheet> ordered = new ArrayList<>(familySheets);
+        final List<UIKeyframeSheet> source = familySheets;
+        final List<Integer> families = familyOf;
+        ordered.sort((x, y) -> Integer.compare(families.get(source.indexOf(x)), families.get(source.indexOf(y))));
+
+        for (int i = 0; i < ordered.size(); i++)
+        {
+            sheets.set(familySlots.get(i), ordered.get(i));
         }
 
         for (TrackDescriptor track : catalog)
@@ -233,36 +242,22 @@ public class UIReplaysEditorUtils
         }
     }
 
-    /** Put "Pose 2" style numbering on a row's name, unless the user has already named the track themselves. */
-    private static void numberSheet(UIKeyframeSheet sheet, String word, int number)
-    {
-        if (sheet.title == sheet.defaultTitle)
-        {
-            sheet.title = IKey.constant(word + " " + number);
-        }
-    }
-
-    /** "pose" or "transform" for the form's own pose / transform track and its overlays; null for anything else. */
-    private static String numberedKind(TrackId id)
+    /** 0 pose, 1 pose overlay, 2 transform, 3 transform overlay; -1 for anything else. */
+    private static int familyOf(TrackId id)
     {
         if (id == null || id.kind() != TrackKind.PROPERTY)
         {
-            return null;
+            return -1;
         }
 
         String subject = id.subject();
 
-        if (subject.equals("pose") || subject.startsWith("pose_overlay"))
-        {
-            return "pose";
-        }
+        if (subject.equals("pose")) return 0;
+        if (subject.startsWith("pose_overlay")) return 1;
+        if (subject.equals("transform")) return 2;
+        if (subject.startsWith("transform_overlay")) return 3;
 
-        if (subject.equals("transform") || subject.startsWith("transform_overlay"))
-        {
-            return "transform";
-        }
-
-        return null;
+        return -1;
     }
 
     /** Remove links to filtered rows while keeping their surviving children accessible. */
