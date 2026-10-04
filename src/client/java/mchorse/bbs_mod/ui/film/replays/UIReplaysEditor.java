@@ -132,6 +132,11 @@ public class UIReplaysEditor extends UIElement implements IBoneSelectionHost
     private UIIcon allToggle;
     private UIIcon sectionsToggle;
     private boolean allMode;
+    /* «All parts» (the 2.5.2 behaviour): the timeline lists the tracks of EVERY part of the form at once,
+     * so bones, overlays and body parts can be edited side by side without switching part first.
+     * Off = the 2.7 behaviour of showing only the selected part's tracks. */
+    private static boolean allParts = true;
+    private UIIcon partsToggle;
 
     /* Clips */
     private UIFilmPanel filmPanel;
@@ -331,6 +336,10 @@ public class UIReplaysEditor extends UIElement implements IBoneSelectionHost
         this.sectionsToggle = new UIIcon(Icons.COLLAPSE_ALL, b -> this.toggleAllSections());
         this.sectionsToggle.tooltip(L10n.lang("bbs.ui.film.replays.collapse_all"), Direction.RIGHT);
 
+        this.partsToggle = new UIIcon(Icons.LIMB, b -> this.toggleAllParts());
+        this.partsToggle.tooltip(IKey.constant("Hiện tất cả bộ phận cùng lúc / Show all parts at once"), Direction.RIGHT);
+        this.partsToggle.highlight(() -> allParts, Direction.LEFT);
+
         /* Actions timeline, pinned to the bottom of the bar. */
         this.actionsToggle = new UIIcon(Icons.ACTION, b -> this.toggleActionsMode());
         this.actionsToggle.tooltip(UIKeys.FILM_REPLAY_ACTIONS_TIMELINE, Direction.RIGHT);
@@ -344,7 +353,7 @@ public class UIReplaysEditor extends UIElement implements IBoneSelectionHost
         TrackCategories.registerShortcuts(this.keys(), () -> TrackCategories.values().stream()
             .filter(category -> this.tabButtons.get(category).getParent() != null).toList(), this::setCategory);
 
-        this.add(this.iconBar, this.sectionsToggle, this.actionsToggle, this.replayTransform);
+        this.add(this.iconBar, this.sectionsToggle, this.partsToggle, this.actionsToggle, this.replayTransform);
         this.partHeader.relative(this).x(CATEGORY_BAR_WIDTH).y(0).w(120).h(TimelineRulerRenderer.RULER_BLOCK_HEIGHT);
         this.partHeader.add(new UIRenderable(context ->
         {
@@ -367,6 +376,12 @@ public class UIReplaysEditor extends UIElement implements IBoneSelectionHost
             this.keyframeEditor.view.getDopeSheet().setAllSectionsExpanded(
                 !this.keyframeEditor.view.getDopeSheet().hasExpandedSections());
         }
+    }
+
+    private void toggleAllParts()
+    {
+        allParts = !allParts;
+        this.updateChannelsList();
     }
 
     private void setCategory(TrackCategory c)
@@ -476,6 +491,17 @@ public class UIReplaysEditor extends UIElement implements IBoneSelectionHost
         this.selectedPart = path;
         this.pendingPick = null;
         this.selectedPartsByReplay.put(this.replay.getId(), path);
+
+        if (allParts)
+        {
+            /* Every part's tracks are already on the timeline, so picking a part must not rebuild it:
+             * a rebuild throws away the keyframe selection the user is working in. */
+            this.selectedPart = this.replaysList.setBodyPartsReplay(this.replay, this.selectedPart);
+            this.replaysList.resize();
+
+            return;
+        }
+
         this.updateChannelsList();
     }
 
@@ -561,7 +587,9 @@ public class UIReplaysEditor extends UIElement implements IBoneSelectionHost
         }
 
         this.selectedPartsByReplay.put(this.replay.getId(), this.selectedPart);
-        List<TrackDescriptor> catalog = TrackCatalog.forPart(this.replay.form.get(), this.replay.properties, this.selectedPart);
+        List<TrackDescriptor> catalog = allParts
+            ? TrackCatalog.ordered(TrackCatalog.of(this.replay.form.get(), this.replay.properties))
+            : TrackCatalog.forPart(this.replay.form.get(), this.replay.properties, this.selectedPart);
 
         List<UIKeyframeSheet> sheets = new ArrayList<>();
 
@@ -984,12 +1012,14 @@ public class UIReplaysEditor extends UIElement implements IBoneSelectionHost
 
         this.partHeader.removeFromParent();
         this.sectionsToggle.removeFromParent();
-        this.add(this.iconBar, this.sectionsToggle, this.actionsToggle, this.partHeader);
+        this.partsToggle.removeFromParent();
+        this.add(this.iconBar, this.sectionsToggle, this.partsToggle, this.actionsToggle, this.partHeader);
     }
 
     /** Pin the actions toggle below the category buttons. */
     private void layoutActionsToggle()
     {
+        this.partsToggle.relative(this).x(0).y(1F, -60).wh(CATEGORY_BAR_WIDTH, 20);
         this.sectionsToggle.relative(this).x(0).y(1F, -40).wh(CATEGORY_BAR_WIDTH, 20);
         this.actionsToggle.relative(this).x(0).y(1F, -20).wh(CATEGORY_BAR_WIDTH, 20);
     }
@@ -1213,6 +1243,18 @@ public class UIReplaysEditor extends UIElement implements IBoneSelectionHost
             }
         }
 
+        boolean partsButtonFits = true;
+
+        for (UIIcon button : this.iconBar.getChildren(UIIcon.class))
+        {
+            if (button.isVisible() && button.area.ey() >= this.partsToggle.area.y)
+            {
+                partsButtonFits = false;
+                break;
+            }
+        }
+
+        this.partsToggle.setVisible(this.timelineVisible && notEditing && partsButtonFits);
         this.sectionsToggle.setVisible(this.timelineVisible && notEditing && foldingButtonFits);
         this.sectionsToggle.setEnabled(sectionsAvailable);
         boolean collapseSections = sectionsAvailable && this.keyframeEditor.view.getDopeSheet().hasExpandedSections();
