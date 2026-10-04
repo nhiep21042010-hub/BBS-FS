@@ -21,6 +21,7 @@ import mchorse.bbs_mod.film.replays.FormProperties;
 import mchorse.bbs_mod.film.replays.tracks.TrackDescriptor;
 import mchorse.bbs_mod.film.replays.tracks.TrackId;
 import mchorse.bbs_mod.film.replays.tracks.TrackKind;
+import mchorse.bbs_mod.film.replays.tracks.TrackStyle;
 import mchorse.bbs_mod.film.FilmTarget;
 import mchorse.bbs_mod.film.replays.Replay;
 import mchorse.bbs_mod.forms.FormUtils;
@@ -186,9 +187,38 @@ public class UIReplaysEditorUtils
     {
         Map<TrackId, UIKeyframeSheet> rows = new HashMap<>();
 
+        /* The pose and transform tracks come in several kinds (the form's own, plus overlays), and on
+         * a timeline that lists every part at once they all read alike. Number them in the order they
+         * are listed: "Pose 1", "Pose 2", "Transform 1"... - only when there is more than one to tell apart. */
+        int poses = 0;
+        int transforms = 0;
+
+        for (TrackDescriptor track : catalog)
+        {
+            String kind = numberedKind(track.id());
+
+            if ("pose".equals(kind)) poses += 1;
+            else if ("transform".equals(kind)) transforms += 1;
+        }
+
+        int poseNumber = 0;
+        int transformNumber = 0;
+
         for (TrackDescriptor track : catalog)
         {
             UIKeyframeSheet sheet = new UIKeyframeSheet(track);
+            String kind = numberedKind(track.id());
+
+            if ("pose".equals(kind) && poses > 1)
+            {
+                poseNumber += 1;
+                sheet.numbered(TrackStyle.label(TrackId.property("", "pose")).get(), poseNumber);
+            }
+            else if ("transform".equals(kind) && transforms > 1)
+            {
+                transformNumber += 1;
+                sheet.numbered(TrackStyle.label(TrackId.property("", "transform")).get(), transformNumber);
+            }
 
             rows.put(track.id(), sheet);
             sheets.add(sheet);
@@ -201,6 +231,29 @@ public class UIReplaysEditorUtils
                 rows.get(track.id()).setParent(rows.get(track.parent()));
             }
         }
+    }
+
+    /** "pose" or "transform" for the form's own pose / transform track and its overlays; null for anything else. */
+    private static String numberedKind(TrackId id)
+    {
+        if (id == null || id.kind() != TrackKind.PROPERTY)
+        {
+            return null;
+        }
+
+        String subject = id.subject();
+
+        if (subject.equals("pose") || subject.startsWith("pose_overlay"))
+        {
+            return "pose";
+        }
+
+        if (subject.equals("transform") || subject.startsWith("transform_overlay"))
+        {
+            return "transform";
+        }
+
+        return null;
     }
 
     /** Remove links to filtered rows while keeping their surviving children accessible. */
@@ -725,11 +778,9 @@ public class UIReplaysEditorUtils
             IUIKeyframeGraph graph = keyframeEditor.view.getGraph();
             Keyframe selected = graph.getSelected();
             UIKeyframeSheet currentSheet = selected != null ? graph.getSheet(selected) : null;
-            TrackId currentPath = currentSheet == null ? null : TrackId.parse(currentSheet.id, TrackKind.BONE);
-            if (currentPath != null && !path.equals(currentPath.formPath()))
-            {
-                return;
-            }
+            /* Every part's tracks are on the timeline at once, so a keyframe selected on ANOTHER part must
+             * not block this pick: falling through selects this part's own track, which is what makes
+             * the gizmo (and auto-keyframing) follow the part that was clicked instead of staying put. */
             if (isPoseSheet(currentSheet, path))
             {
                 float tick = keyframeEditor.view.getTick();
