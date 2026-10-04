@@ -55,6 +55,10 @@ public class UIKeyframeSheet
      */
     private final String filterKey;
 
+    /** Set by {@link #numbered}: the running number that tells two tracks of one kind apart. */
+    private String numberWord = "";
+    private int number;
+
     public final KeyframeChannel channel;
     public final KeyframeSelection selection;
     public final BaseValueBasic property;
@@ -175,7 +179,15 @@ public class UIKeyframeSheet
         ValueTrackStyles styles = BBSSettings.trackStyles;
         String name = styles == null ? "" : styles.name(this.filterKey, "");
 
-        this.title = name.isEmpty() ? this.defaultTitle : IKey.constant(name);
+        if (this.number > 0)
+        {
+            /* "Pose 1", "Pose 2"...: a user's own name for the track still wins over the kind's word. */
+            this.title = IKey.constant((name.isEmpty() ? this.numberWord : name) + " " + this.number);
+        }
+        else
+        {
+            this.title = name.isEmpty() ? this.defaultTitle : IKey.constant(name);
+        }
         this.color = styles == null ? this.defaultColor : styles.color(this.filterKey, this.defaultColor);
     }
 
@@ -201,6 +213,17 @@ public class UIKeyframeSheet
         }
 
         return depth;
+    }
+
+    /** Give the row a running number after its name, so several tracks of one kind can be told apart. */
+    public UIKeyframeSheet numbered(String word, int number)
+    {
+        this.numberWord = word;
+        this.number = number;
+
+        this.applyStyle();
+
+        return this;
     }
 
     public UIKeyframeSheet icon(Icon icon)
