@@ -902,6 +902,20 @@ public class UIReplaysEditorUtils
         }
         else
         {
+            /* Auto-keyframing is on and this bone's track has nothing at all: key it at the playhead
+             * now, so the edit that follows lands on a keyframe in the right place instead of on a
+             * track nobody can see a change in. Only for an empty track, so clicking around never
+             * litters a track that already has keys. */
+            if (keyframeEditor.view.getAutoKeyframeTick() != null && sheet.channel.isEmpty())
+            {
+                Keyframe created = graph.addKeyframe(sheet, tick, null);
+
+                if (created != null)
+                {
+                    graph.selectKeyframe(created);
+                }
+            }
+
             updatePoseEditorBoneSelection(keyframeEditor, boneForEditor);
         }
     }
