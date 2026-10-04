@@ -212,12 +212,12 @@ public class UIReplaysEditorUtils
             if ("pose".equals(kind) && poses > 1)
             {
                 poseNumber += 1;
-                sheet.numbered(TrackStyle.label(TrackId.property("", "pose")).get(), poseNumber);
+                numberSheet(sheet, TrackStyle.label(TrackId.property("", "pose")).get(), poseNumber);
             }
             else if ("transform".equals(kind) && transforms > 1)
             {
                 transformNumber += 1;
-                sheet.numbered(TrackStyle.label(TrackId.property("", "transform")).get(), transformNumber);
+                numberSheet(sheet, TrackStyle.label(TrackId.property("", "transform")).get(), transformNumber);
             }
 
             rows.put(track.id(), sheet);
@@ -230,6 +230,15 @@ public class UIReplaysEditorUtils
             {
                 rows.get(track.id()).setParent(rows.get(track.parent()));
             }
+        }
+    }
+
+    /** Put "Pose 2" style numbering on a row's name, unless the user has already named the track themselves. */
+    private static void numberSheet(UIKeyframeSheet sheet, String word, int number)
+    {
+        if (sheet.title == sheet.defaultTitle)
+        {
+            sheet.title = IKey.constant(word + " " + number);
         }
     }
 
