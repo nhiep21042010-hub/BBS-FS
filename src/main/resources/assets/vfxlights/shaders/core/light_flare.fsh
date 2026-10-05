@@ -118,7 +118,7 @@ void main()
     float ghostGain = 1.0;
     float orbGain = 0.0;
     float bokehGain = 0.0;
-    vec3 cast = vec3(1.0);
+    vec3 tintCast = vec3(1.0);
 
     if (style == 0)
     {
@@ -142,7 +142,7 @@ void main()
         anaLines = 3.0;
         ghostGain = 0.5;
         ringGain = 0.08;
-        cast = vec3(0.82, 0.92, 1.12);
+        tintCast = vec3(0.82, 0.92, 1.12);
     }
     else if (style == 4)
     {
@@ -152,7 +152,7 @@ void main()
         ringRadius = 0.27;
         ghostGain = 0.8;
         orbGain = 0.6;
-        cast = vec3(1.12, 1.0, 0.82);
+        tintCast = vec3(1.12, 1.0, 0.82);
     }
     else if (style == 5)
     {
@@ -170,7 +170,7 @@ void main()
         needleGain = 0.12;
         ghostGain = 0.4;
         ringGain = 0.07;
-        cast = vec3(0.85, 0.96, 1.1);
+        tintCast = vec3(0.85, 0.96, 1.1);
     }
     else if (style == 7)
     {
@@ -180,7 +180,7 @@ void main()
         hoopGain = 0.13;
         ghostGain = 1.35;
         bokehGain = 0.4;
-        cast = vec3(1.06, 1.0, 0.88);
+        tintCast = vec3(1.06, 1.0, 0.88);
     }
     else
     {
@@ -193,7 +193,7 @@ void main()
     /* Normalised tint: the lamp's HUE at full brightness — the flare's energy lives in strength. */
     vec3 tint = FlareColor / max(max(FlareColor.r, max(FlareColor.g, FlareColor.b)), 0.001);
 
-    tint *= cast;
+    tint *= tintCast;
 
     vec3 color = vec3(0.0);
 
