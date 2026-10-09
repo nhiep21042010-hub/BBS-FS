@@ -46,6 +46,9 @@ public class BBSSettings {
 	public static ValueStringKeys disabledMorphFormCategories;
 	public static ValueLanguage language;
 	public static ValueInt primaryColor;
+	public static ValueInt bannerStyle;
+	public static ValueInt bannerColorStart;
+	public static ValueInt bannerColorEnd;
 	public static ValueInt stencilHighlightColor;
 	public static ValueBoolean enableTrackpadIncrements;
 	public static ValueBoolean enableTrackpadScrolling;
@@ -691,6 +694,13 @@ public class BBSSettings {
 		builder.category("personalization", Icons.COLOR);
 		primaryColor = builder.getInt("primary_color", DEFAULT_PRIMARY_COLOR).color();
 		secondaryColor = builder.getInt("secondary_color", DEFAULT_SECONDARY_COLOR).color();
+		/* Edited from the pencil on the landing screen banner, not from the settings list */
+		bannerStyle = builder.getInt("banner_style", 0, 0, 2);
+		bannerColorStart = builder.getInt("banner_color_start", 0x1b2a4e);
+		bannerColorEnd = builder.getInt("banner_color_end", 0x8a3ffc);
+		bannerStyle.invisible();
+		bannerColorStart.invisible();
+		bannerColorEnd.invisible();
 		stencilHighlightColor = builder.getInt("stencil_highlight_color", 0x2EFFFFFF).colorAlpha();
 		overlayBackgroundOpacity = builder.getFloat("overlay_background_opacity", DEFAULT_OVERLAY_BACKGROUND_OPACITY, 0F, 1F).slider();
 		interfaceBlur = builder.getBoolean("interface_blur", true);
