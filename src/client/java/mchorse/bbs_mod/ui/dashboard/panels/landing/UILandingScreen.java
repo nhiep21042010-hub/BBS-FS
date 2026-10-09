@@ -168,7 +168,7 @@ public class UILandingScreen extends UIElement
     {
         String version = getReleaseVersion();
 
-        return "BBS FS" + (version.isEmpty() ? "" : " " + version);
+        return "BBS RE" + (version.isEmpty() ? "" : " " + version);
     }
 
     private static String getReleaseVersion()
@@ -311,7 +311,7 @@ public class UILandingScreen extends UIElement
     private void renderBannerCaption(UIContext context, Area area)
     {
         FontRenderer font = context.batcher.getFont();
-        String brand = "\u00a7lBBS FS";
+        String brand = "\u00a7lBBS RE";
         String credit = "render by ";
         String artist = "Kizrum";
         int brandWidth = font.getWidth(brand);
