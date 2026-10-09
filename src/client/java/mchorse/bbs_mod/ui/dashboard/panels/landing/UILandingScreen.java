@@ -10,6 +10,8 @@ import mchorse.bbs_mod.settings.values.core.ValueRecentData.Entry;
 import mchorse.bbs_mod.ui.UIKeys;
 import mchorse.bbs_mod.ui.framework.UIContext;
 import mchorse.bbs_mod.ui.framework.elements.UIElement;
+import mchorse.bbs_mod.ui.framework.elements.buttons.UIIcon;
+import mchorse.bbs_mod.ui.framework.elements.overlay.UIOverlay;
 import mchorse.bbs_mod.ui.framework.elements.utils.FontRenderer;
 import mchorse.bbs_mod.ui.framework.elements.utils.UILabel;
 import mchorse.bbs_mod.ui.framework.elements.utils.UIRenderable;
@@ -98,6 +100,13 @@ public class UILandingScreen extends UIElement
         this.banner.relative(this.card).xy(0, 0).w(1F).h(BANNER_H);
         this.banner.add(new UIRenderable((context) -> this.renderBanner(context, this.banner.area)));
         this.banner.add(new UIRenderable((context) -> this.renderBannerCaption(context, this.banner.area)));
+
+        /* The pencil: opens the banner editor (style and gradient colours) */
+        UIIcon editBanner = new UIIcon(Icons.EDIT, (b) -> UIOverlay.addOverlay(this.getContext(), new UIBannerEditorPanel(), 260, 200));
+
+        editBanner.tooltip(IKey.constant("Chỉnh banner"));
+        editBanner.relative(this.banner).x(1F, -PADDING - 20).y(PADDING).wh(20, 20);
+        this.banner.add(editBanner);
 
         UILabel title = UI.label(host.getTitle()).color(DIMMED);
         title.labelAnchor(0, 0.5F);
@@ -348,6 +357,25 @@ public class UILandingScreen extends UIElement
 
     private void renderBanner(UIContext context, Area area)
     {
+        int style = BBSSettings.bannerStyle.get();
+
+        if (style != 0)
+        {
+            int a = Colors.A100 | (BBSSettings.bannerColorStart.get() & Colors.RGB);
+            int b = Colors.A100 | (BBSSettings.bannerColorEnd.get() & Colors.RGB);
+
+            if (style == 1)
+            {
+                context.batcher.gradientVBox(area.x, area.y, area.ex(), area.ey(), a, b);
+            }
+            else
+            {
+                context.batcher.gradientHBox(area.x, area.y, area.ex(), area.ey(), a, b);
+            }
+
+            return;
+        }
+
         /* Warm the texture cache before timing the slideshow, including after a reload. */
         for (Link link : BANNERS)
         {
