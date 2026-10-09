@@ -21,6 +21,7 @@ import mchorse.bbs_mod.actions.types.item.UseItemActionClip;
 import mchorse.bbs_mod.camera.clips.misc.AudioClientClip;
 import mchorse.bbs_mod.camera.clips.misc.CurveClientClip;
 import mchorse.bbs_mod.camera.clips.misc.ImageClip;
+import mchorse.bbs_mod.camera.clips.misc.PhotoClip;
 import mchorse.bbs_mod.camera.clips.misc.SubtitleClip;
 import mchorse.bbs_mod.camera.clips.misc.TrackerClientClip;
 import mchorse.bbs_mod.camera.clips.misc.VideoClientClip;
@@ -132,6 +133,7 @@ public abstract class UIClip <T extends Clip> extends UIElement
         register(VideoClientClip.class, UIVideoClip::new);
         register(SubtitleClip.class, UISubtitleClip::new);
         register(ImageClip.class, UIImageClip::new);
+        register(PhotoClip.class, UIPhotoClip::new);
         register(CurveClientClip.class, UICurveClip::new);
         register(DollyZoomClip.class, UIDollyZoomClip::new);
 

@@ -505,6 +505,7 @@
 	"bbs.ui.camera.clips.bbs:drop_item": "Drop item",
 	"bbs.ui.camera.clips.bbs:idle": "Idle",
 	"bbs.ui.camera.clips.bbs:image": "Image",
+	"bbs.ui.camera.clips.bbs:photo": "Photo",
 	"bbs.ui.camera.clips.bbs:interact_block": "Interact with block",
 	"bbs.ui.camera.clips.bbs:keyframe": "Keyframe",
 	"bbs.ui.camera.clips.bbs:look": "Look",
